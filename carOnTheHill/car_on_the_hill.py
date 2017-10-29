@@ -1,14 +1,15 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.integrate import odeint
 
 class Agent(object):
     X_SUPPORT_MIN, X_SUPPORT_MAX = -1, 1
-    X_SUPPORT_POINTS = 21
+    X_SUPPORT_POINTS = 101
     X_SUPPORT = np.linspace(X_SUPPORT_MIN, X_SUPPORT_MAX, num=X_SUPPORT_POINTS)
 
     X_DOT_SUPPORT_MIN, X_DOT_SUPPORT_MAX = -2, 2
-    X_DOT_SUPPORT_POINTS = 21
+    X_DOT_SUPPORT_POINTS = 101
     X_DOT_SUPPORT = np.linspace(
         X_DOT_SUPPORT_MIN, X_DOT_SUPPORT_MAX, num=X_DOT_SUPPORT_POINTS)
 
@@ -118,16 +119,29 @@ class Agent(object):
 
 
 class Environment(object):
-    T_STEP = 0.3
+    T_STEP = 0.03
     X_TARGET, X_DOT_TARGET = 0.6, 0
+
 
     def next_state(self, current_state, action):
         current_x, current_x_dot = current_state
         grad = self.gradient(current_x)
         accel = self.acceleration(action, grad)
-        next_x = self.next_x(current_x_dot, self.T_STEP, accel, current_x)
-        next_x_dot = self.next_x_dot(current_x_dot, self.T_STEP, accel)
-        return next_x, next_x_dot
+        n_steps = 100
+
+        for _ in range(n_steps):
+            x_dot, x_double_dot = self.step([current_x, current_x_dot], action)
+            current_x += (self.T_STEP / n_steps) * x_dot 
+            current_x_dot += (self.T_STEP / n_steps) * x_double_dot 
+        # next_x = self.next_x(current_x_dot, self.T_STEP, accel, current_x)
+        # next_x_dot = self.next_x_dot(current_x_dot, self.T_STEP, accel)
+        return current_x, current_x_dot
+
+    def step(self, current_state, action):
+        current_x, current_x_dot = current_state
+        grad = self.gradient(current_x)
+        accel = self.acceleration(action, grad)
+        return [current_x_dot, accel]
 
     def gradient(self, x):
         if x >= 0:
@@ -139,11 +153,11 @@ class Environment(object):
         G = 9.81
         return force - G * math.sin(math.atan(gradient))
 
-    def next_x(self, u, t, a, current_x):
-        return current_x + u * t + 0.5 * a * t * t
+    # def next_x(self, u, t, a, current_x):
+    #     return current_x + u * t + 0.5 * a * t ** 2
 
-    def next_x_dot(self, u, t, a):
-        return u + a * t
+    # def next_x_dot(self, u, t, a):
+    #     return u + a * t
 
     def reward(self, next_state):
         TOLERANCE = 0.001
