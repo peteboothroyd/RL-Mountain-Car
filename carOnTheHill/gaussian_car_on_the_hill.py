@@ -2,6 +2,7 @@ import math
 import datetime
 import pickle
 import numpy as np
+import itertools
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -90,59 +91,54 @@ class Agent(object):
 
       v_squared, l1, l2 = np.exp(self.gp_val.kernel_.theta)
       print("v_squared: %s, l1: %s, l2: %s" % (v_squared, l1, l2))
-      lengths = np.array([l1, l2])
+      lengths = np.array([l1, l2]).reshape((-1,1))
       lengths_squared = np.square(lengths)
-      l1, l2 = 1/l1, 1/l2
 
       R = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, 1))
       W = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS))
       maximising_actions = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, 1))
-      state_counter = 0
 
-      target = np.array([0.6, 0.0])
+      target = np.array([0.6, 0.0]).reshape((-1,1))
       
       for state_index in range(len(self.support_states)):
         x, x_dot = self.support_states[state_index]
         max_action_val = None
 
-        for k in range(self.A_SUPPORT_POINTS):
-          action = self.A_SUPPORT[k]
-          state_action = np.array((x, x_dot, action)).reshape(1, -1)
-          mu_x, std_dev_x = self.gp_x.predict(state_action, return_std=True)
-          mu_x_dot, std_dev_x_dot = self.gp_x_dot.predict(state_action, return_std=True)
+        state_actions = np.array(list(itertools.product([x], [x_dot], self.A_SUPPORT)))
 
-          means = np.array([mu_x[0], mu_x_dot[0]])
-          var = np.square(np.array([std_dev_x[0], std_dev_x_dot[0]]))
-          length_squared_plus_var = np.add(var, lengths_squared)
-          state_diffs = np.subtract(self.support_states, means)
-          state_diffs_squared = np.square(state_diffs)
-          state_diffs_squared_divided_length_plus_var = np.divide(state_diffs_squared, length_squared_plus_var)
-          summed = -0.5 * np.sum(state_diffs_squared_divided_length_plus_var, axis=1)
-          exponentiated = np.exp(summed)
-          product = np.prod(length_squared_plus_var)
-          square_root = np.sqrt(product)
+        mu_x, std_dev_x = self.gp_x.predict(state_actions, return_std=True)
+        mu_x_dot, std_dev_x_dot = self.gp_x_dot.predict(state_actions, return_std=True)
 
-          wi2 = np.prod(lengths) * v_squared * np.divide(exponentiated, square_root)
+        means = np.array([mu_x, mu_x_dot])
+        var = np.square(np.array([std_dev_x, std_dev_x_dot]))
+        length_squared_plus_var = np.add(var, lengths_squared)
+        state_diffs = np.subtract(self.support_states[:,:, np.newaxis], means)
+        state_diffs_squared = np.square(state_diffs)
+        state_diffs_squared_divided_length_plus_var = np.divide(state_diffs_squared, length_squared_plus_var)
+        summed = -0.5 * np.sum(state_diffs_squared_divided_length_plus_var, axis=1)
+        exponentiated = np.exp(summed)
+        product = np.prod(length_squared_plus_var, axis=0)
+        square_root = np.sqrt(product)
 
-          target_minus_mean = np.subtract(target, means)
-          squared_target_minus_mean = np.square(target_minus_mean)
-          var_plus = var + 0.05 ** 2
-          divided = np.divide(squared_target_minus_mean, var_plus)
-          summed = -0.5 * np.sum(divided, axis=0)
-          exponentiated = np.exp(summed)
-          product = np.prod(var_plus)
-          square_root = np.sqrt(product)
-          ri = np.divide(exponentiated, square_root) / (2 * math.pi * 63.66)
+        w = np.prod(lengths) * v_squared * np.divide(exponentiated, square_root)
 
-          vi = self.GAMMA * wi2.dot(k_v_inv_v)
-          val_i = ri + vi[0]
+        target_minus_mean = np.subtract(target, means)
+        squared_target_minus_mean = np.square(target_minus_mean)
+        var_plus = var + 0.05 ** 2
+        divided = np.divide(squared_target_minus_mean, var_plus)
+        summed = -0.5 * np.sum(divided, axis=0)
+        exponentiated = np.exp(summed)
+        product = np.prod(var_plus, axis=0)
+        square_root = np.sqrt(product)
+        r = np.divide(exponentiated, square_root) / (2 * math.pi * 63.66)
 
-          if max_action_val is None or val_i > max_action_val:
-            max_action_val = val_i
-            maximising_actions[state_counter][0] = action
-            R[state_index][0] = ri
-            W[state_index] = wi2
-      
+        v = self.GAMMA * w.T.dot(k_v_inv_v)
+        val_i = r + v.T
+
+        max_val_index = np.argmax(val_i)
+        maximising_actions[state_index][0] = self.A_SUPPORT[max_val_index]
+        R[state_index][0] = r[max_val_index]
+        W[state_index] = w[:,max_val_index]
     
       intermediate1 = np.eye(self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS) - self.GAMMA * W.dot(k_v_inv)
       intermediate2 = np.linalg.inv(intermediate1)
