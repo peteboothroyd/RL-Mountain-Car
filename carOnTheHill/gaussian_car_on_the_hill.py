@@ -90,21 +90,19 @@ class Agent(object):
 
       v_squared, l1, l2 = np.exp(self.gp_val.kernel_.theta)
       print("v_squared: %s, l1: %s, l2: %s" % (v_squared, l1, l2))
-      # l1, l2 = 1/l1, 1/l2
       lengths = np.array([l1, l2])
       lengths_squared = np.square(lengths)
       l1, l2 = 1/l1, 1/l2
 
       R = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, 1))
       W = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS))
-      # V = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, 1))
       maximising_actions = np.zeros((self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS, 1))
       state_counter = 0
 
       target = np.array([0.6, 0.0])
       
-      for state in self.support_states:
-        x, x_dot = state
+      for state_index in range(len(self.support_states)):
+        x, x_dot = self.support_states[state_index]
         max_action_val = None
 
         for k in range(self.A_SUPPORT_POINTS):
@@ -112,8 +110,6 @@ class Agent(object):
           state_action = np.array((x, x_dot, action)).reshape(1, -1)
           mu_x, std_dev_x = self.gp_x.predict(state_action, return_std=True)
           mu_x_dot, std_dev_x_dot = self.gp_x_dot.predict(state_action, return_std=True)
-          # wi = np.zeros((1, self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS))
-          # i = 0
 
           means = np.array([mu_x[0], mu_x_dot[0]])
           var = np.square(np.array([std_dev_x[0], std_dev_x_dot[0]]))
@@ -123,15 +119,11 @@ class Agent(object):
           state_diffs_squared_divided_length_plus_var = np.divide(state_diffs_squared, length_squared_plus_var)
           summed = -0.5 * np.sum(state_diffs_squared_divided_length_plus_var, axis=1)
           exponentiated = np.exp(summed)
-          length_squared_var_plus_one = np.multiply(lengths_squared, var) + 1
-          product = np.prod(length_squared_var_plus_one)
+          product = np.prod(length_squared_plus_var)
           square_root = np.sqrt(product)
 
-          wi2 = np.prod(lengths) * np.prod(np.sqrt(var)) * v_squared * np.divide(exponentiated, square_root)
+          wi2 = np.prod(lengths) * v_squared * np.divide(exponentiated, square_root)
 
-          # ri = math.exp(-0.5 * (pow(0.6-mu_x[0], 2)/(pow(std_dev_x[0], 2) + pow(0.05, 2)) + pow(mu_x_dot[0], 2)/(pow(std_dev_x_dot[0], 2) + pow(0.05, 2)))) \
-          # / (pow((pow(std_dev_x[0], 2) + pow(0.05, 2))*(pow(std_dev_x_dot[0], 2) + pow(0.05, 2)), 0.5) * 2 * math.pi * 63.66)
-          
           target_minus_mean = np.subtract(target, means)
           squared_target_minus_mean = np.square(target_minus_mean)
           var_plus = var + 0.05 ** 2
@@ -140,28 +132,17 @@ class Agent(object):
           exponentiated = np.exp(summed)
           product = np.prod(var_plus)
           square_root = np.sqrt(product)
-          ri2 = np.divide(exponentiated, square_root) / (2 * math.pi * 63.66)
+          ri = np.divide(exponentiated, square_root) / (2 * math.pi * 63.66)
 
-
-          # for statej in self.support_states:
-          #   # wi[0][state_j_index] = pow((l1+std_dev_theta_1**2)*(l2+std_dev_theta_2**2)*(l3+std_dev_theta_3**2)/(l1*l2*l3), -0.5) \
-          #   #     * v_squared * math.exp(-0.5 * (pow(state_j[0] - mu_theta_1, 2) / (l1 + std_dev_theta_1**2) + \
-          #   #     pow(state_j[1] - mu_theta_2, 2) / (l2 + std_dev_theta_2**2) + \
-          #   #     pow(state_j[2] - mu_theta_3, 2) / (l3 + std_dev_theta_3**2)))
-          #   wi[0][i] = v_squared * math.exp(-0.5 * (pow(l1 * (statej[0] - mu_x[0]), 2) / (1 + pow(l1 * std_dev_x[0], 2)) + pow(l2 * (statej[1] - mu_x_dot[0]), 2) / (1 + pow(l2 * std_dev_x_dot[0], 2)))) / pow((pow(l1 * std_dev_x[0], 2) + 1) * (pow(l2 * std_dev_x_dot[0], 2) + 1), 0.5)
-          #   i += 1
-
-          vi = self.GAMMA * np.dot(wi2, k_v_inv_v)
-          val_i = ri + vi[0][0]
+          vi = self.GAMMA * wi2.dot(k_v_inv_v)
+          val_i = ri + vi[0]
 
           if max_action_val is None or val_i > max_action_val:
             max_action_val = val_i
             maximising_actions[state_counter][0] = action
-            R[state_counter][0] = ri
-            W[state_counter] = wi
-            # V[state_counter] = vi[0][0]
-        
-        state_counter += 1
+            R[state_index][0] = ri
+            W[state_index] = wi2
+      
     
       intermediate1 = np.eye(self.X_SUPPORT_POINTS * self.X_DOT_SUPPORT_POINTS) - self.GAMMA * W.dot(k_v_inv)
       intermediate2 = np.linalg.inv(intermediate1)
@@ -189,22 +170,6 @@ class Agent(object):
   def learn_value_function(self):
     kernel = ConstantKernel(constant_value=1.0, constant_value_bounds=(1e-3, 100)) * RBF(length_scale=[0.1, 0.1], length_scale_bounds=(0.05, 10.0))
     gp_val = GaussianProcessRegressor(kernel=kernel, alpha=0.01, n_restarts_optimizer=9)
-
-    # x_surround1 = np.linspace(self.X_SUPPORT_MIN - 1, self.X_SUPPORT_MAX, 11)
-    # y_surround1 = np.linspace(self.X_DOT_SUPPORT_MAX, self.X_DOT_SUPPORT_MAX + 1, 2)
-    # x_surround2 = np.linspace(self.X_SUPPORT_MAX, self.X_SUPPORT_MAX + 1, 2)
-    # y_surround2 = np.linspace(self.X_DOT_SUPPORT_MIN, self.X_DOT_SUPPORT_MAX + 1, 11)
-    # x_surround3 = np.linspace(self.X_SUPPORT_MIN, self.X_SUPPORT_MAX + 1, 11)
-    # y_surround3 = np.linspace(self.X_DOT_SUPPORT_MIN - 1, self.X_DOT_SUPPORT_MIN, 2)
-    # x_surround4 = np.linspace(self.X_SUPPORT_MIN - 1, self.X_SUPPORT_MIN, 2)
-    # y_surround4 = np.linspace(self.X_DOT_SUPPORT_MIN - 1, self.X_DOT_SUPPORT_MAX, 11)
-
-    # surround_states = np.concatenate([cartesian((x_surround1, y_surround1)), cartesian((x_surround2, y_surround2)), cartesian((x_surround3, y_surround3)), cartesian((x_surround4, y_surround4))])
-    # surround_vals = np.zeros((surround_states.shape[0])).reshape((-1,1))
-
-    # states = np.concatenate([self.support_states, surround_states])
-    # vals = np.concatenate([self.support_values, surround_vals])
-
     gp_val = gp_val.fit(self.support_states, self.support_values)
 
     predicted_vals = gp_val.predict(self.support_states)
