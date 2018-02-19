@@ -21,7 +21,7 @@ def hill():
   x1 = np.linspace(-1,0, num=150)
   x2 = np.linspace(0,1,num=150)
   y1 = x1 * x1 + x1
-  y2 = x2 / np.sqrt(1 + 5 * x2*x2)
+  y2 = x2 / np.sqrt(1 + 5 * x2**2)
   x = np.concatenate([x1, x2])
   y = np.concatenate([y1, y2])
 

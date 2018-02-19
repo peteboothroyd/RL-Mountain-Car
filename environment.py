@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import odeint
 from scipy.stats import multivariate_normal
 
-class Environment(object):
+class MountainCar(object):
     """The environment in the reinforcement learning framework.
     """
 
@@ -18,7 +18,6 @@ class Environment(object):
         def diff(state, t, action):
             return [state[1], self.acceleration(state[0], action)]
 
-        current_x, current_x_dot = current_state
         t = np.linspace(0, self.t_step, 101)
         start = [current_state[0], current_state[1]]
 

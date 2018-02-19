@@ -60,7 +60,7 @@ class GaussianProcessAgent(object):
     def initialise_support_values(self):
         for i in range(self.x_points * self.x_dot_points):
             state = self.states[i]
-            reward = self.environment.reward(state)
+            reward, _ = self.environment._reward(state, 0)
             self.support_values[i][0] = reward
     
     def learn_value_function(self, states, values):
@@ -89,6 +89,11 @@ class GaussianProcessAgent(object):
         # Add a color bar which maps values to colors.
         fig.colorbar(surf, shrink=0.5, aspect=5)
         plt.savefig("gp%s.png" % iter_num, dpi=300)
+
+        plt.clf()
+        contour = plt.contourf(X, X_DOT, predicted_vals)
+        plt.colorbar(contour, shrink=0.5)
+        plt.savefig("values%s.png" % iter_num, dpi=300)
         
         if maximising_actions is not None:
             plt.clf()
@@ -111,7 +116,9 @@ class GaussianProcessAgent(object):
 
         for state in start_states:
             x, x_dot, a = state
-            next_x, next_x_dot = self.environment.next_state((x, x_dot), a)
+            self.environment.reset(state=[x,x_dot])
+            self.environment.step(a)
+            next_x, next_x_dot = self.environment.get_state()
             next_xs.append(next_x)
             next_x_dots.append(next_x_dot)
         
@@ -139,7 +146,9 @@ class GaussianProcessAgent(object):
 
         for state in start_states:
             x, x_dot, a = state
-            next_x, next_x_dot = self.environment.next_state((x, x_dot), a)
+            self.environment.reset(state=[x,x_dot])
+            self.environment.step(a)
+            next_x, next_x_dot = self.environment.get_state()
             next_xs.append(next_x)
             next_x_dots.append(next_x_dot)
 
@@ -227,7 +236,8 @@ class GaussianProcessAgent(object):
                 pickle.dump(self.support_values, fp)
 
     def find_max_action(self, x, x_dot):
-        target = np.array(self.environment.target).reshape((-1,1))
+        target = np.array([self.environment.goal_position, self.environment.goal_velocity]).reshape((-1,1))
+        # target = np.array(self.environment.target).reshape((-1,1))
         k_v_inv_v = self.gp_val.alpha_
 
         v_squared, l1, l2 = np.exp(self.gp_val.kernel_.theta)
@@ -254,7 +264,7 @@ class GaussianProcessAgent(object):
 
         target_minus_mean = np.subtract(target, means)
         squared_target_minus_mean = np.square(target_minus_mean)
-        var_plus = var + self.environment.reward_length_scale ** 2
+        var_plus = var + self.environment.gaussian_reward_length_scale ** 2
         divided = np.divide(squared_target_minus_mean, var_plus)
         summed = -0.5 * np.sum(divided, axis=0)
         exponentiated = np.exp(summed)
@@ -270,34 +280,11 @@ class GaussianProcessAgent(object):
 
         return max_val_index, r[max_val_index], w[:,max_val_index]
     
-    def act(self, start_state):
-        plt.clf()
-        current_x, current_x_dot = start_state
-        target_x, target_x_dot = 0.6, 0.0
-        initial_val = self.gp_val.predict(np.array((current_x, current_x_dot)).reshape(1, -1))
-        path_x, path_x_dot, val = [current_x], [current_x_dot], [initial_val]
-        predicted_xs, predicted_x_dots = [current_x], [current_x_dot]
+    def act(self, env_state):
+        current_x, current_x_dot = env_state
+        max_val_index, _, _ = self.find_max_action(current_x, current_x_dot)
 
-        k_v_chol = self.gp_val.L_.dot(self.gp_val.L_.T)
-        k_v_inv = np.linalg.inv(k_v_chol)
-
-        target = np.array([target_x, target_x_dot]).reshape((-1,1))
-
-        for _ in range(15):
-            state_actions = np.array(list(itertools.product([current_x], [current_x_dot], self.a)))
-            
-            max_val_index, _, _ = self.find_max_action(current_x, current_x_dot)
-
-            current_x, current_x_dot = self.environment.next_state((current_x, current_x_dot), self.a[max_val_index], visualise=True)
-
-            path_x.append(current_x)
-            path_x_dot.append(current_x_dot)
-
-            if abs(current_x - target_x) < 0.05 and abs(current_x_dot - target_x_dot) < 0.05:
-                break
-
-        self.plot_actions(path_x, path_x_dot)
-        
+        return self.a[max_val_index]
     
     def plot_actions(self, xs, x_dots):
         redline = mlines.Line2D([], [], color='red', label="Actual")
@@ -309,7 +296,7 @@ class GaussianProcessAgent(object):
         
         plt.xlabel("x")
         plt.ylabel("dx")
-        
+
         plt.xlim([-1.5,1.5])
         plt.ylim([-2.5,2.5])
         

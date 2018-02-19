@@ -1,22 +1,20 @@
 from gym_environment import Continuous_MountainCarEnv
-from gaussian_process_agent import GaussianProcessAgent
+from policy_gradient_agent import PolicyGradientAgent
 from time import sleep
-
 import argparse
 
 def main():
-    parser = argparse.ArgumentParser(description='Uses Gaussian Process techniques to solve the Mountain Car reinforcement learning task.')
+    parser = argparse.ArgumentParser(description='Uses policy gradient techniques to solve the Mountain Car reinforcement learning task.')
     parser.add_argument('--visualise', type=bool, help='whether to visualise the graphs')
 
     args = parser.parse_args()
     
-    env = Continuous_MountainCarEnv(gaussian_reward=True)
-    agent = GaussianProcessAgent(env, args.visualise)
-    
-    agent.learn()
+    env = Continuous_MountainCarEnv()
+    agent = PolicyGradientAgent(env, args.visualise)
     env.reset()
 
-    for t in range(100):
+    for _ in range(1000):
+        sleep(0.05)
 
         if args.visualise:
             env.render()
@@ -24,10 +22,10 @@ def main():
         action = agent.act(env.get_state())
         _, _, done, _ = env.step(action)
 
-        sleep(0.05)
         if done:
             print("Episode finished after {} timesteps".format(t+1))
             break
 
 if __name__ == "__main__":
     main()
+        
