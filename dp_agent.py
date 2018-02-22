@@ -2,6 +2,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import odeint
+from gym_environment import Continuous_MountainCarEnv
 
 class Agent(object):
   X_SUPPORT_MIN, X_SUPPORT_MAX = -1, 1
@@ -122,54 +123,55 @@ class Agent(object):
       else:
         return mid
 
-class Environment(object):
-  T_STEP = 0.2
-  X_TARGET, X_DOT_TARGET = 0.6, 0
+# class Environment(object):
+#   T_STEP = 0.2
+#   X_TARGET, X_DOT_TARGET = 0.6, 0
 
-  def next_state(self, current_state, action, visualise=False):
-    def diff(state, t, action):
-      return [state[1], self.acceleration(state[0], action)]
+#   def next_state(self, current_state, action, visualise=False):
+#     def diff(state, t, action):
+#       return [state[1], self.acceleration(state[0], action)]
 
-    current_x, current_x_dot = current_state
-    t = np.linspace(0, self.T_STEP, 101)
-    start = [current_state[0], current_state[1]]
+#     current_x, current_x_dot = current_state
+#     t = np.linspace(0, self.T_STEP, 101)
+#     start = [current_state[0], current_state[1]]
 
-    sol = odeint(diff, start, t, args=(action,))
+#     sol = odeint(diff, start, t, args=(action,))
     
-    if visualise:
-      plt.plot(sol[:,0], sol[:,1], "r-")
+#     if visualise:
+#       plt.plot(sol[:,0], sol[:,1], "r-")
 
-    final_x, final_x_dot = sol[-1, 0], sol[-1, 1]
+#     final_x, final_x_dot = sol[-1, 0], sol[-1, 1]
     
-    return final_x, final_x_dot
+#     return final_x, final_x_dot
 
-  def step(self, current_state, action):
-    current_x, current_x_dot = current_state
-    accel = self.acceleration(current_x, action)
-    return [current_x_dot, accel]
+#   def step(self, current_state, action):
+#     current_x, current_x_dot = current_state
+#     accel = self.acceleration(current_x, action)
+#     return [current_x_dot, accel]
 
-  def acceleration(self, current_x, action):
-    def gradient(x):
-      if x >= 0:
-        return math.pow((1 + 5 * x ** 2), -1.5)
-      else:
-        return 2 * x + 1
+#   def acceleration(self, current_x, action):
+#     def gradient(x):
+#       if x >= 0:
+#         return math.pow((1 + 5 * x ** 2), -1.5)
+#       else:
+#         return 2 * x + 1
     
-    G = 9.81
+#     G = 9.81
     
-    return action - G * math.sin(math.atan(gradient(current_x)))
+#     return action - G * math.sin(math.atan(gradient(current_x)))
 
-  def reward(self, next_state):
-    TOLERANCE = 0.1
-    x, x_dot = next_state
-    if abs(x - self.X_TARGET) <= TOLERANCE  and abs(x_dot - self.X_DOT_TARGET) <= TOLERANCE:
-      return 0
-    else:
-      return -1
+#   def reward(self, next_state):
+#     TOLERANCE = 0.1
+#     x, x_dot = next_state
+#     if abs(x - self.X_TARGET) <= TOLERANCE  and abs(x_dot - self.X_DOT_TARGET) <= TOLERANCE:
+#       return 0
+#     else:
+#       return -1
 
 
 if __name__ == "__main__":
-  env = Environment()
+  # env = Environment()
+  env = Continuous_MountainCarEnv()
   agent = Agent(env)
   print('learning')
   agent.learn()

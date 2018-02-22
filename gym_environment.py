@@ -28,9 +28,10 @@ class Continuous_MountainCarEnv(gym.Env):
         'video.frames_per_second': 30
     }
 
-    def __init__(self, gaussian_reward=False, t_step=0.03):
+    def __init__(self, gaussian_reward=False, t_step=0.3):
         self.min_action = -4.0              # measured in Nm
         self.max_action = 4.0               # measured in Nm
+        self.last_action = 0.0              # measured in Nm (used for render)
         self.min_position = -1.0            # measured in m
         self.max_position = 1.0             # measured in m
         self.min_velocity = -2.0            # measured in m/s
@@ -63,6 +64,7 @@ class Continuous_MountainCarEnv(gym.Env):
         return [seed]
 
     def step(self, action):
+        self.last_action = action
         def acceleration(current_x, action):
             G = 9.81
             return action - G * math.sin(math.atan(self._gradient(current_x)))
@@ -93,21 +95,22 @@ class Continuous_MountainCarEnv(gym.Env):
         reward = 0
         done = False
 
+        position, velocity = next_state
+        # near_goal_position = self.goal_position - self.goal_position_threshold <= position \
+        #                     and position <= self.goal_position + self.goal_position_threshold
+        # near_goal_velocity = self.goal_velocity - self.goal_velocity_threshold <= velocity \
+        #                     and velocity <= self.goal_velocity + self.goal_velocity_threshold
+        # done = near_goal_position and near_goal_velocity
+        done = position >= self.goal_position
+
         if self.gaussian_reward:
             reward = multivariate_normal.pdf(next_state,
                                             [self.goal_position, self.goal_velocity],
                                             self.gaussian_reward_length_scale**2)
-        else:
-            position, velocity = next_state
-            near_goal_position = self.goal_position - self.goal_position_threshold <= position \
-                             and position <= self.goal_position + self.goal_position_threshold
-            near_goal_velocity = self.goal_velocity - self.goal_velocity_threshold <= velocity \
-                                and velocity <= self.goal_velocity + self.goal_velocity_threshold
-            done = near_goal_position and near_goal_velocity
-            if done:
-                reward = 100
+        elif done:
+            reward = 100
 
-        reward -= 0.1*action**2
+        reward = reward - self.t_step #- 0.1*action**2
 
         return reward, done
 
@@ -142,7 +145,6 @@ class Continuous_MountainCarEnv(gym.Env):
         xs = np.linspace(self.min_position, self.max_position, 100)
         ys = self._height(xs)
         min_y = np.min(ys)
-
 
         if self.viewer is None:
             from gym.envs.classic_control import rendering
@@ -179,10 +181,17 @@ class Continuous_MountainCarEnv(gym.Env):
             flag = rendering.FilledPolygon([(flagx, flagy2), (flagx, flagy2-10), (flagx+25, flagy2-5)])
             flag.set_color(.8,.8,0)
             self.viewer.add_geom(flag)
+            
+            action = rendering.Line((0, 0), (0, 50))
+            self.action_trans = rendering.Transform()
+            action.add_attr(self.action_trans)
+            self.viewer.add_geom(action)
 
         pos = self.state[0]
         self.cartrans.set_translation((pos-self.min_position)*scale, (self._height(pos)-min_y)*scale)
         self.cartrans.set_rotation(self._gradient(pos))
+        self.action_trans.set_translation(50, 50)
+        self.action_trans.set_rotation(np.sin(-self.last_action*np.pi/(2*self.max_action)))
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
 
