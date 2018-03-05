@@ -11,57 +11,19 @@ import utils
 
 
 def main():
-  # Setup command line interface
-  parser = argparse.ArgumentParser(description='Uses policy gradient \
-    techniques to solve the Mountain Car reinforcement learning task.')
-  parser.add_argument('--visualise', '-v', type=bool,
-                      help='whether to visualise the graphs (default: False)', default=False)
-  parser.add_argument('--model_dir', type=str,
-                      help='the output directory for summaries (default: ./tmp)',
-                      default='./tmp')
-  parser.add_argument('--exp_name', type=str,
-                      help='the name of the experiment (default: exp)',
-                      default='exp')
-  parser.add_argument('--max_episode_steps', type=int,
-                      help='the maximum number of steps per episode (default: 500)',
-                      default=500)
-  parser.add_argument('--debug', type=bool,
-                      help='debug the application (default: False)',
-                      default=False)
-  parser.add_argument('--hyper_search', type=bool,
-                      help='search hyperparameter space (default: False)',
-                      default=False)
-  parser.add_argument('--summary_every', type=int,
-                      help='summary every n episodes (default: 500)',
-                      default=500)
-  parser.add_argument('--critic', type=bool,
-                      help='whether to use a critic (default: False)',
-                      default=False)
-  parser.add_argument('--full_reward', type=bool,
-                      help='whether to use a the total return for gradient (default: False)',
-                      default=False)
-  parser.add_argument('--normalize_advantages', type=bool,
-                      help='whether to use normalize the advantage (default: True)',
-                      default=True)
-  parser.add_argument('--gaussian_env', type=bool,
-                      help='whether to use the gaussian reward (default: False)',
-                      default=False)
-  parser.add_argument('--gamma', type=float,
-                      help='value of gamma for Bellman equations (default: 1.0)',
-                      default=1.0)
-  args = parser.parse_args()
-
+  args = command_line_args()
   utils.set_global_seeds(1)
-
+  
   # Create environment and agent
-  print(args.gaussian_env)
   if args.gaussian_env:
-    print('Gaussian continuing task')
-    env = Continuous_MountainCarEnv(gaussian_reward_scale=0.5)
-  else:
-    print('Episodic task')
+    print('Using Gaussian reward')
     env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
-        terminating=True), max_episode_steps=1000)
+        gaussian_reward_scale=0.05, t_step=0.1), max_episode_steps=1000)
+  else:
+    print('Not using Gaussian reward')
+    env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
+        terminating=True, t_step=0.1), max_episode_steps=1000)
+    # env = gym.envs.make('MountainCarContinuous-v0')
 
   if args.hyper_search:
     hyperparameter_search(env)
@@ -73,58 +35,136 @@ def main():
                               debug=args.debug,
                               summary_every=args.summary_every,
                               critic=args.critic,
-                              full_reward=args.full_reward,
-                              normalize_adv=args.normalize_advantages,
-                              gamma=args.gamma)
+                              future_returns=args.future_returns,
+                              gamma=args.gamma,
+                              tensorboard_summaries=args.no_tensorboard_summaries,
+                              use_pol_expl_loss=args.pol_expl_loss,
+                              use_pol_reg_loss=args.pol_reg_loss)
+  
+  if not args.plot_learning:
+    # Teach the agent how to act optimally
+    try:
+      agent.learn()
+    finally:
+      # Run one rollout using trained agent
+      obs = env.reset()
 
-  # Teach the agent how to act optimally
-  try:
-    agent.learn()
-  finally:
-    # Display learned optimal behaviour when exiting learn early
+      for t_step in range(args.max_episode_steps):
+        if args.visualise:
+          env.render()
+          time.sleep(0.1)
 
-    # Reset environment
-    obs = env.reset()
+          action = agent.act(obs)
+          obs, _, done, _ = env.step(action)
 
-    # Run one rollout using trained agent
-    for t_step in range(args.max_episode_steps):
-      if args.visualise:
-        env.render()
-        time.sleep(0.1)
+          if done:
+            print('Episode finished after {} timesteps'.format(t_step+1))
+            break
+      
+      env.close()
+  else:
+    generate_plot(agent, args.summary_every, args.exp_name)
 
-        action = agent.act(obs)
-        obs, _, done, _ = env.step(action)
 
-        if done:
-          print('Episode finished after {} timesteps'.format(t_step+1))
-          break
-    
-    env.close()
+def command_line_args():
+  # Setup command line interface
+  parser = argparse.ArgumentParser(description='Uses policy gradient \
+    techniques to solve the Mountain Car reinforcement learning task.')
+  parser.add_argument('--visualise', '-v', action='store_true',
+                      help='whether to visualise the graphs (default: False)')
+  parser.add_argument('--model_dir', type=str,
+                      help='the output directory for summaries (default: ./tmp)',
+                      default='./tmp')
+  parser.add_argument('--exp_name', type=str,
+                      help='the name of the experiment (default: exp)',
+                      default='exp')
+  parser.add_argument('--max_episode_steps', type=int,
+                      help='the maximum number of steps per episode (default: 500)',
+                      default=500)
+  parser.add_argument('--debug', action='store_true',
+                      help='debug the application (default: False)')
+  parser.add_argument('--hyper_search', action='store_true',
+                      help='search hyperparameter space (default: False)')
+  parser.add_argument('--summary_every', type=int,
+                      help='summary every n episodes (default: 500)',
+                      default=50)
+  parser.add_argument('--critic', action='store_true',
+                      help='whether to use a critic (default: False)')
+  parser.add_argument('--future_returns', action='store_false',
+                      help='whether to use only future returns for the gradient (default: True)')
+  parser.add_argument('--gaussian_env', action='store_true',
+                      help='whether to use the gaussian reward (default: False)')
+  parser.add_argument('--gamma', type=float,
+                      help='value of gamma for Bellman equations (default: 1.0)',
+                      default=1.0)
+  parser.add_argument('--plot_learning',action='store_true',
+                      help='whether to plot the learning curves with error bars (default: False)')
+  parser.add_argument('--no_tensorboard_summaries',action='store_false',
+                      help='whether to store diagnostics for tensorboard (default: True)')
+  parser.add_argument('--pol_expl_loss',action='store_true',
+                      help='whether to include exploration loss (default: False)')
+  parser.add_argument('--pol_reg_loss',action='store_true',
+                      help='whether to include regularisation loss (default: False)')
+  
+  return parser.parse_args()
 
 
 def hyperparameter_search(env):
-  max_episode_steps = np.logspace(2, 3, num=3)
   entropy_weights = np.logspace(-3, -1, num=3)
   betas = np.logspace(-3, 0, num=3)
+  learning_rates = np.logspace(-5, -2, num=3)
 
-  for mas in max_episode_steps:
-    mas = int(mas)
-    for ew in entropy_weights:
-      for b in betas:
-        env.reset()
-        tf.reset_default_graph()
-        directory = './tmp/mas_%s_ew_%s_b_%s' % (mas, ew, b)
-        print(directory)
-        agent = PolicyGradientAgent(
-            env=env,
-            visualise=False,
-            model_dir=directory,
-            max_episode_steps=mas,
-            debug=False,
-            beta=b,
-            exploration=ew)
-        agent.learn()
+  for e_w in entropy_weights:
+    for beta in betas:
+      for l_r in learning_rates:
+        for pol_expl_loss in [False, True]:
+          for pol_reg_loss in [False, True]:
+            env.reset()
+            tf.reset_default_graph()
+            directory = './tmp/ew_%s_b_%s_lr_%s' % (e_w, beta, l_r)
+            print(directory)
 
+            agent = PolicyGradientAgent(env,
+                                        visualise=False,
+                                        model_dir=directory,
+                                        max_episode_steps=500,
+                                        debug=False,
+                                        summary_every=25,
+                                        critic=True,
+                                        future_returns=True,
+                                        no_normalize_adv=False,
+                                        gamma=1.0,
+                                        beta=beta,
+                                        learning_rate=l_r,
+                                        entropy_weight=e_w,
+                                        pol_expl_loss=pol_expl_loss,
+                                        pol_reg_loss=pol_reg_loss)
+            agent.learn()
+
+
+def generate_plot(agent, summary_every, exp_name):
+  mean_rewards_progress = []
+  std_rewards_progress = []
+  episode_length_progress = []
+
+  for i in range(50):
+    print('********* Iteration {0} *********'.format(i))
+    utils.set_global_seeds(i)
+    mrp, srp, elp, = agent.learn()
+    mean_rewards_progress.append(mrp)
+    std_rewards_progress.append(srp)
+    episode_length_progress.append(elp)
+    agent.reset_policy()
+
+  mean_rewards_progress = np.array(mean_rewards_progress)
+  std_rewards_progress = np.array(std_rewards_progress)
+  episode_length_progress = np.array(episode_length_progress)
+
+  utils.plot(mean_rewards_progress,
+             std_rewards_progress,
+             episode_length_progress,
+             agent._env, agent._policy,
+             summary_every, exp_name)
 
 if __name__ == '__main__':
   main()
