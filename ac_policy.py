@@ -1,5 +1,6 @@
 import tensorflow as tf
 
+
 class AcPolicy(object):
   def __init__(self, sess, ob_space, ac_space, beta, entropy_weight,
                val_learning_rate=1e-3, pol_learning_rate=1e-4,
@@ -9,25 +10,9 @@ class AcPolicy(object):
     ac_dim = ac_space.shape[0]
 
     with tf.name_scope('inputs'):
-      actions = tf.placeholder(
-          tf.float32, shape=[None, ac_dim], name='actions')
-      returns = tf.placeholder(
-          tf.float32, shape=[None], name='returns')
-      states = tf.placeholder(
-          tf.float32, shape=ob_shape, name='obs')
-      is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
-      # tf.summary.histogram('unnormalised_returns', returns)
-
-      # TODO: Experiment with batch normalization
-      # Whiten returns
-      mean_returns, var_returns = tf.nn.moments(returns, axes=[0])
-      normalised_returns = tf.nn.batch_normalization(returns,
-                   mean=mean_returns,
-                   variance=var_returns,
-                   offset=None,
-                   scale=None,
-                   variance_epsilon=1e-4)
-      tf.summary.histogram('normalised_returns', normalised_returns)
+      returns, states, is_training, actions = self._create_input_placeholders(
+          ac_dim, ob_shape)
+      normalised_returns = self._normalise(returns)
 
     with tf.name_scope('actor'):
       with tf.name_scope('action_statistics'):
@@ -46,20 +31,14 @@ class AcPolicy(object):
             name='mean')
         mean = mean_layer(hidden)
 
-        # Add weights to collection for regularization
-        mean_weights = mean_layer.trainable_variables
-        for weight in mean_weights:
-          if 'bias' not in weight.name:
-            tf.add_to_collection(
-                pol_network_reg_collection, weight)
+        self._add_weights_to_regularisation_collection(
+            mean_layer, pol_network_reg_collection)
 
         # Standard deviation of the normal distribution over actions
-        # TODO: Experiment with making this a function of the state
         std_dev = tf.get_variable(
-            name="std_dev", shape=[ac_dim], 
+            name="std_dev", shape=[ac_dim],
             dtype=tf.float32, initializer=tf.ones_initializer())
         std_dev = tf.nn.softplus(std_dev) + 1e-4
-        tf.add_to_collection(pol_network_reg_collection, std_dev)
 
         tf.summary.histogram('mean', mean)
         tf.summary.histogram('std_dev', std_dev)
@@ -79,8 +58,8 @@ class AcPolicy(object):
                                   name='loss')
 
         pol_reg_losses = tf.get_collection(pol_network_reg_collection)
-        pol_reg_loss = tf.identity(sum(tf.nn.l2_loss(
-            reg_loss) for reg_loss in pol_reg_losses) * beta,
+        pol_reg_loss = tf.identity(
+            sum(tf.nn.l2_loss(reg_loss) for reg_loss in pol_reg_losses) * beta,
             name='pol_reg_loss')
 
         pol_expl_loss = tf.identity(tf.reduce_mean(
@@ -101,44 +80,39 @@ class AcPolicy(object):
 
       # policy training update
       with tf.name_scope('train_policy_network'):
-        # Compute gradients
         pol_optimizer = tf.train.AdamOptimizer(pol_learning_rate)
-        pol_gradients, variables = zip(*pol_optimizer.compute_gradients(pol_total_loss))
-        pol_gradients, _ = tf.clip_by_global_norm(pol_gradients, 5.0)
-        
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
-          train_pol_op = pol_optimizer.apply_gradients(zip(pol_gradients, variables),
-                                                       global_step=tf.train.get_or_create_global_step())
+        pol_grads_and_vars = pol_optimizer.compute_gradients(pol_total_loss)
+        pol_grads_and_vars = self._clip_by_global_norm(pol_grads_and_vars)
+        train_pol_op = self._train_with_batch_norm_update(
+            pol_optimizer, pol_grads_and_vars)
 
     with tf.name_scope('critic'):
-      # TODO: Implement eligibility traces
       with tf.name_scope('predict'):
         val_network_reg_collection = 'val_network_regularization'
-        val_pred_hidden = self._build_mlp(states,
-                                          'hidden_value_network',
-                                          activation=tf.nn.tanh,
-                                          var_collection=val_network_reg_collection,
-                                          is_training=is_training)
+        val_pred_hidden = self._build_mlp(
+            states,
+            'hidden_value_network',
+            activation=tf.nn.tanh,
+            var_collection=val_network_reg_collection,
+            is_training=is_training)
 
-        layer = tf.layers.Dense(units=1,
-                                kernel_initializer=tf.glorot_normal_initializer())
+        layer = tf.layers.Dense(
+            units=1,
+            kernel_initializer=tf.glorot_normal_initializer())
         val_pred = layer(val_pred_hidden)
         tf.summary.histogram('val_pred', val_pred)
 
         # Add weights to collection for regularization
-        weights = layer.trainable_variables
-        for weight in weights:
-          if 'bias' not in weight.name:
-            tf.add_to_collection(val_network_reg_collection, weight)
+        self._add_weights_to_regularisation_collection(
+            layer, val_network_reg_collection)
 
       with tf.name_scope('loss'):
         val_loss = tf.nn.l2_loss(val_pred - normalised_returns)
         tf.summary.scalar('val_loss', val_loss)
 
         val_reg_losses = tf.get_collection(val_network_reg_collection)
-        val_reg_loss = tf.identity(sum(tf.nn.l2_loss(
-            reg_loss) for reg_loss in val_reg_losses) * beta,
+        val_reg_loss = tf.identity(
+            sum(tf.nn.l2_loss(reg_loss) for reg_loss in val_reg_losses) * beta,
             name='val_reg_loss')
         tf.summary.scalar('val_reg_loss', val_reg_loss)
 
@@ -147,13 +121,10 @@ class AcPolicy(object):
 
       with tf.name_scope('gradients'):
         val_optimizer = tf.train.AdamOptimizer(val_learning_rate)
-        val_gradients, variables = zip(*val_optimizer.compute_gradients(val_total_loss))
-        #TODO: Test impact of clipping gradients
-        val_gradients, _ = tf.clip_by_global_norm(val_gradients, 5.0)
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
-          train_val_op = val_optimizer.apply_gradients(zip(val_gradients, variables),
-                                                     global_step=tf.train.get_or_create_global_step())
+        val_grads_and_vars = val_optimizer.compute_gradients(val_total_loss)
+        val_grads_and_vars = self._clip_by_global_norm(val_grads_and_vars)
+        train_val_op = self._train_with_batch_norm_update(
+            val_optimizer, val_grads_and_vars)
 
     self._summaries = tf.summary.merge_all()
 
@@ -242,7 +213,7 @@ class AcPolicy(object):
     sample_action = tf.nn.tanh(
         std_dev * standard_normal + mean, name='sample_action')
     sample_action = sample_action * (ac_space.high[0]-ac_space.low[0]) * 0.5 \
-          + (ac_space.high[0]+ac_space.low[0]) * 0.5
+        + (ac_space.high[0]+ac_space.low[0]) * 0.5
     tf.summary.histogram('sample_action', sample_action)
     return sample_action
 
@@ -256,15 +227,16 @@ class AcPolicy(object):
       kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3),
       var_collection=None,
       is_training=True
-      ):
+  ):
 
     with tf.variable_scope(scope):
       output = input_placeholder
       for i in range(n_layers):
-        layer = tf.layers.Dense(units=size, activation=activation,
-                                kernel_initializer=tf.glorot_normal_initializer(),
-                                kernel_regularizer=kernel_regularizer,
-                                name="dense_{}".format(i))
+        layer = tf.layers.Dense(
+            units=size, activation=activation,
+            kernel_initializer=tf.glorot_normal_initializer(),
+            kernel_regularizer=kernel_regularizer,
+            name="dense_{}".format(i))
         output = layer(output)
         output = tf.layers.batch_normalization(output, training=is_training)
 
@@ -274,3 +246,56 @@ class AcPolicy(object):
             tf.add_to_collection(var_collection, weight)
 
     return output
+
+  def _train_with_batch_norm_update(self, optimizer, grads_and_vars):
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+      train_op = optimizer.apply_gradients(
+          grads_and_vars,
+          global_step=tf.train.get_or_create_global_step())
+    return train_op
+
+  def _clip_by_global_norm(self, grads_and_vars, norm=5.0):
+    grads, variables = zip(*grads_and_vars)
+    clipped_grads, _ = tf.clip_by_global_norm(grads, norm)
+    return zip(clipped_grads, variables)
+
+  def _normalise(self, x):
+    mean, var = tf.nn.moments(x, axes=[0])
+    normalised_x = tf.nn.batch_normalization(x,
+                                             mean=mean,
+                                             variance=var,
+                                             offset=None,
+                                             scale=None,
+                                             variance_epsilon=1e-4)
+    return normalised_x
+
+  def _create_input_placeholders(self, ac_dim, ob_shape):
+    actions = tf.placeholder(
+        tf.float32, shape=[None, ac_dim], name='actions')
+    returns = tf.placeholder(
+        tf.float32, shape=[None], name='returns')
+    states = tf.placeholder(
+        tf.float32, shape=ob_shape, name='obs')
+    is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
+    return returns, states, is_training, actions
+
+  def _add_weights_to_regularisation_collection(self,
+                                                layer,
+                                                val_network_reg_collection):
+    weights = layer.trainable_variables
+    for weight in weights:
+      if 'bias' not in weight.name:
+        # Don't want to regularise the biases
+        tf.add_to_collection(val_network_reg_collection, weight)
+
+        # Eligibility trace
+        # for grad, var in pol_grads_and_vars:
+        #   if grad is not None:
+        #     trace_name = var.name + '/trace'
+        #     trace = tf.get_variable(name=trace_name,
+        #                             trainable=False,
+        #                             shape=grad.get_shape(),
+        #                             initializer=tf.zeros_initializer())
+        #     grad = gamma * lmbda * trace + grad
+        #     tf.summary.histogram(trace_name, trace)

@@ -95,7 +95,7 @@ class Continuous_MountainCarEnv(gym.Env):
       #             and position <= self.goal_position + self.goal_position_threshold
       # near_goal_velocity = self.goal_velocity - self.goal_velocity_threshold <= velocity \
       #             and velocity <= self.goal_velocity + self.goal_velocity_threshold
-      # done = near_goal_position and near_goal_velocity
+      # return near_goal_position and near_goal_velocity
       return position >= self.goal_position
     else:
       return False

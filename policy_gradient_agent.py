@@ -11,7 +11,7 @@ from runner import EpisodicRunner
 class PolicyGradientAgent(object):
   def __init__(self, env, visualise, model_dir, max_episode_steps,
                debug, summary_every=100, future_returns=True, critic=False,
-               beta=1e-3, entropy_weight=0.01, gamma=0.99,
+               beta=1e-3, entropy_weight=0.01, gamma=1.0,
                tensorboard_summaries=True, learning_rate=5e-3, num_learning_steps=500,
                use_pol_reg_loss=False, use_pol_expl_loss=False):
 
@@ -51,10 +51,8 @@ class PolicyGradientAgent(object):
       self._summary_writer = tf.summary.FileWriter(model_dir)
       self._summary_writer.add_graph(self._sess.graph, global_step=self._episode)
 
-    # Check that the graph has been successfully initialised
-    uninitialized_vars = self._sess.run(tf.report_uninitialized_variables())
-    if uninitialized_vars.shape[0] != 0:
-      print('Not all variables have been initialized!')
+    if not self._graph_initialized():
+      raise Exception('Graph not initialised')
 
   def act(self, observation):
     ''' Given an observation of the state return an action
@@ -135,4 +133,8 @@ class PolicyGradientAgent(object):
           'max: {0:.2f}'.format(np.amax(x)),
           'min: {0:.2f}'.format(np.amin(x)),
           'shape: ', str(x.shape))
+
+  def _graph_initialized(self):
+    uninitialized_vars = self._sess.run(tf.report_uninitialized_variables())
+    return True if uninitialized_vars.shape[0] == 0 else False
   
