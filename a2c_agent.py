@@ -46,7 +46,7 @@ class A2CAgent(object):
                                   summary_every=summary_every,
                                   future_returns=future_returns)
 
-    if self._tensorboard_summaries:
+    if not self._no_tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
       self._summary_writer.add_graph(self._sess.graph, global_step=self._episode)
 
@@ -98,7 +98,7 @@ class A2CAgent(object):
           #                       self._episode,
           #                       self._env.observation_space)
 
-          if self._tensorboard_summaries:
+          if not self._no_tensorboard_summaries:
             summary, run_metadata = self._policy.summarize(
                 adv, actions, states)
             self._summary_writer.add_run_metadata(
@@ -113,9 +113,12 @@ class A2CAgent(object):
       save_model_path = os.path.join(self._model_dir, 'model.ckpt')
       self._save_model(save_model_path)
 
-      if self._tensorboard_summaries:
+      if not self._no_tensorboard_summaries:
         self._summary_writer.flush()
         self._summary_writer.close()
+  
+  def rollout(self):
+    self._runner.rollout(render=True, t_sleep=0.1)
 
   def rollout(self, t_sleep):
     self._runner.rollout(render=True, t_sleep=t_sleep)

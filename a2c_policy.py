@@ -176,7 +176,6 @@ class A2CPolicy(object):
       '''Summarize key stats for TensorBoard. '''
       run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
       run_metadata = tf.RunMetadata()
-
       feed_dict = {
           states: obs,
           returns: advs,

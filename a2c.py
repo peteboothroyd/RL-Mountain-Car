@@ -44,13 +44,13 @@ def main():
     try:
       agent.learn()
     finally:
+<<<<<<< HEAD:a2c.py
       agent.rollout(0.1)
+=======
+      agent.rollout()
+>>>>>>> master:policy_gradient.py
       env.close()
-  else:
     generate_plot(agent, args.summary_every, args.exp_name)
-
-
-def command_line_args():
   ''' Setup command line interface. '''
   parser = argparse.ArgumentParser(
       description='Uses advantage actor critic \
