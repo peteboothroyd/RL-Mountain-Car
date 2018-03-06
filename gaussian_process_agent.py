@@ -257,7 +257,6 @@ class GaussianProcessAgent(object):
   def find_max_action(self, x, x_dot):
     target = np.array([self.environment.goal_position,
                        self.environment.goal_velocity]).reshape((-1, 1))
-    # target = np.array(self.environment.target).reshape((-1,1))
     k_v_inv_v = self.gp_val.alpha_
 
     v_squared, l1, l2 = np.exp(self.gp_val.kernel_.theta)

@@ -1,5 +1,4 @@
 import argparse
-import time
 
 import gym
 import numpy as np
@@ -7,40 +6,37 @@ import tensorflow as tf
 
 import utils
 from gym_environment import Continuous_MountainCarEnv
-from policy_gradient_agent import PolicyGradientAgent
+from a2c_agent import A2CAgent
 
 
 def main():
   args = command_line_args()
   utils.set_global_seeds(1)
 
-  # Create environment and agent
-  if args.gaussian_env:
-    print('Using Gaussian reward')
-    env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
-        gaussian_reward_scale=0.05, t_step=0.1), max_episode_steps=1000)
-  else:
-    print('Not using Gaussian reward')
-    env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
-        terminating=True, t_step=0.1), max_episode_steps=1000)
-    # env = gym.envs.make('MountainCarContinuous-v0')
+  # # Create environment and agent
+  # if args.gaussian_env:
+  #   print('Using Gaussian reward')
+  #   env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
+  #       gaussian_reward_scale=0.05, t_step=0.1), max_episode_steps=1000)
+  # else:
+  env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
+      terminating=True, t_step=0.1), max_episode_steps=1000)
 
   if args.hyper_search:
     hyperparameter_search(env)
-
-  agent = PolicyGradientAgent(
+  print(args)
+  agent = A2CAgent(
       env,
       visualise=args.visualise,
       model_dir=args.model_dir+'/'+args.exp_name,
       max_episode_steps=args.max_episode_steps,
       debug=args.debug,
       summary_every=args.summary_every,
-      critic=args.critic,
       future_returns=args.future_returns,
       gamma=args.gamma,
-      tensorboard_summaries=args.no_tensorboard_summaries,
-      use_pol_expl_loss=args.pol_expl_loss,
-      use_pol_reg_loss=args.pol_reg_loss
+      tensorboard_summaries=args.tensorboard_summaries,
+      use_actor_expl_loss=args.actor_expl_loss,
+      use_actor_reg_loss=args.actor_reg_loss
       )
 
   if not args.plot_learning:
@@ -48,21 +44,7 @@ def main():
     try:
       agent.learn()
     finally:
-      # Run one rollout using trained agent
-      obs = env.reset()
-
-      for t_step in range(args.max_episode_steps):
-        if args.visualise:
-          env.render()
-          time.sleep(0.1)
-
-          action = agent.act(obs)
-          obs, _, done, _ = env.step(action)
-
-          if done:
-            print('Episode finished after {} timesteps'.format(t_step+1))
-            break
-
+      agent.rollout(0.1)
       env.close()
   else:
     generate_plot(agent, args.summary_every, args.exp_name)
@@ -71,7 +53,7 @@ def main():
 def command_line_args():
   ''' Setup command line interface. '''
   parser = argparse.ArgumentParser(
-      description='Uses policy gradient \
+      description='Uses advantage actor critic \
       techniques to solve the Mountain Car reinforcement learning task.')
   parser.add_argument(
       '--visualise', '-v', action='store_true',
@@ -91,21 +73,19 @@ def command_line_args():
   parser.add_argument(
       '--debug', action='store_true',
       help='debug the application (default: False)')
-  parser.add_argument('--hyper_search', action='store_true',
+  parser.add_argument(
+      '--hyper_search', action='store_true',
       help='search hyperparameter space (default: False)')
   parser.add_argument(
       '--summary_every', type=int,
-      help='summary every n episodes (default: 500)',
+      help='summary every n episodes (default: 50)',
       default=50)
-  parser.add_argument(
-      '--critic', action='store_true',
-      help='use a critic (default: False)')
   parser.add_argument(
       '--future_returns', action='store_false',
       help='use only future returns for the gradient (default: True)')
-  parser.add_argument(
-      '--gaussian_env', action='store_true',
-      help='use the gaussian reward (default: False)')
+  # parser.add_argument(
+  #     '--gaussian_env', action='store_true',
+  #     help='use the gaussian reward (default: False)')
   parser.add_argument(
       '--gamma', type=float,
       help='value of gamma for Bellman equations (default: 1.0)',
@@ -114,13 +94,13 @@ def command_line_args():
       '--plot_learning', action='store_true',
       help='plot the learning curves with error bars (default: False)')
   parser.add_argument(
-      '--no_tensorboard_summaries', action='store_false',
-      help='store diagnostics for tensorboard (default: True)')
+      '--tensorboard_summaries', action='store_true',
+      help='do not store diagnostics for tensorboard (default: False)')
   parser.add_argument(
-      '--pol_expl_loss', action='store_true',
+      '--actor_expl_loss', action='store_true',
       help='include exploration loss (default: False)')
   parser.add_argument(
-      '--pol_reg_loss', action='store_true',
+      '--actor_reg_loss', action='store_true',
       help='include regularisation loss (default: False)')
 
   return parser.parse_args()
@@ -128,33 +108,32 @@ def command_line_args():
 
 def hyperparameter_search(env):
   entropy_weights = np.logspace(-3, -1, num=3)
-  betas = np.logspace(-3, 0, num=3)
+  reg_coeffs = np.logspace(-3, 0, num=3)
   learning_rates = np.logspace(-5, -2, num=3)
 
   for e_w in entropy_weights:
-    for beta in betas:
+    for r_c in reg_coeffs:
       for l_r in learning_rates:
-        for pol_expl_loss in [False, True]:
-          for pol_reg_loss in [False, True]:
+        for actor_expl_loss in [False, True]:
+          for actor_reg_loss in [False, True]:
             env.reset()
             tf.reset_default_graph()
-            directory = './tmp/ew_%s_b_%s_lr_%s' % (e_w, beta, l_r)
+            directory = './tmp/ew_%s_rc_%s_lr_%s' % (e_w, r_c, l_r)
             print(directory)
 
-            agent = PolicyGradientAgent(env,
-                                        visualise=False,
-                                        model_dir=directory,
-                                        max_episode_steps=500,
-                                        debug=False,
-                                        summary_every=25,
-                                        critic=True,
-                                        future_returns=True,
-                                        gamma=1.0,
-                                        beta=beta,
-                                        learning_rate=l_r,
-                                        entropy_weight=e_w,
-                                        use_pol_expl_loss=pol_expl_loss,
-                                        use_pol_reg_loss=pol_reg_loss)
+            agent = A2CAgent(env,
+                             visualise=False,
+                             model_dir=directory,
+                             max_episode_steps=500,
+                             debug=False,
+                             summary_every=25,
+                             future_returns=True,
+                             gamma=1.0,
+                             reg_coeff=r_c,
+                             learning_rate=l_r,
+                             entropy_weight=e_w,
+                             use_actor_expl_loss=actor_expl_loss,
+                             use_actor_reg_loss=actor_reg_loss)
             agent.learn()
 
 
@@ -179,7 +158,6 @@ def generate_plot(agent, summary_every, exp_name):
   utils.plot(mean_rewards_progress,
              std_rewards_progress,
              episode_length_progress,
-             agent._env, agent._policy,
              summary_every, exp_name)
 
 
