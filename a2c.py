@@ -44,11 +44,7 @@ def main():
     try:
       agent.learn()
     finally:
-<<<<<<< HEAD:a2c.py
       agent.rollout(0.1)
-=======
-      agent.rollout()
->>>>>>> master:policy_gradient.py
       env.close()
     generate_plot(agent, args.summary_every, args.exp_name)
   ''' Setup command line interface. '''
@@ -131,7 +127,7 @@ def hyperparameter_search(env):
                              gamma=1.0,
                              reg_coeff=r_c,
                              learning_rate=l_r,
-                             entropy_weight=e_w,
+                             ent_coeff=e_w,
                              use_actor_expl_loss=actor_expl_loss,
                              use_actor_reg_loss=actor_reg_loss)
             agent.learn()
