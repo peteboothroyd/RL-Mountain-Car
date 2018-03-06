@@ -54,6 +54,7 @@ class AcPolicy(object):
         dist = tf.contrib.distributions.MultivariateNormalDiag(
             loc=mean, scale_diag=std_dev)
         log_prob = dist.log_prob(actions, name='log_prob')
+        # Minimising negative equivalent to maximising
         pol_loss = tf.reduce_mean(-log_prob * normalised_returns,
                                   name='loss')
 
@@ -62,8 +63,8 @@ class AcPolicy(object):
             sum(tf.nn.l2_loss(reg_loss) for reg_loss in pol_reg_losses) * beta,
             name='pol_reg_loss')
 
-        pol_expl_loss = tf.identity(tf.reduce_mean(
-            dist.entropy() * entropy_weight), name='pol_expl_loss')
+        pol_expl_loss = tf.identity(tf.reduce_mean(dist.entropy()) * entropy_weight,
+                                    name='pol_expl_loss')
 
         pol_total_loss = pol_loss
 
@@ -96,15 +97,14 @@ class AcPolicy(object):
             var_collection=val_network_reg_collection,
             is_training=is_training)
 
-        layer = tf.layers.Dense(
+        dense_layer = tf.layers.Dense(
             units=1,
             kernel_initializer=tf.glorot_normal_initializer())
-        val_pred = layer(val_pred_hidden)
+        val_pred = dense_layer(val_pred_hidden)
         tf.summary.histogram('val_pred', val_pred)
 
-        # Add weights to collection for regularization
         self._add_weights_to_regularisation_collection(
-            layer, val_network_reg_collection)
+            dense_layer, val_network_reg_collection)
 
       with tf.name_scope('loss'):
         val_loss = tf.nn.l2_loss(val_pred - normalised_returns)
@@ -126,86 +126,81 @@ class AcPolicy(object):
         train_val_op = self._train_with_batch_norm_update(
             val_optimizer, val_grads_and_vars)
 
-    self._summaries = tf.summary.merge_all()
+    summaries = tf.summary.merge_all()
 
-    self._sess = sess
-    self._is_training = is_training
-    self._actions = actions
-    self._returns = returns
-    self._states = states
-    self._sample_action = sample_action
-    self._pol_total_loss = pol_total_loss
-    self._train_pol_op = train_pol_op
-    self._val_pred = val_pred
-    self._val_total_loss = val_total_loss
-    self._train_val_op = train_val_op
+    def act(observation):
+      ''' Return the action output by the policy given the current
+          parameterisation.
+
+      # Params:
+        observation: The observation input to the policy
+
+      # Returns:
+        a: Action
+      '''
+      feed_dict = {states: observation, is_training: False}
+      return sess.run(sample_action, feed_dict=feed_dict)
+
+    def predict_val(observations):
+      ''' Predict the value for given states. '''
+      feed_dict = {states: observations, is_training: False}
+      return sess.run(val_pred, feed_dict=feed_dict)
+
+    def train_pol(advs, acs, obs):
+      ''' Train the policy. Return loss. '''
+      feed_dict = {
+          states: obs,
+          returns: advs,
+          actions: acs,
+          is_training: True
+      }
+
+      _, policy_loss = sess.run(
+          [train_pol_op, pol_total_loss], feed_dict=feed_dict)
+      return policy_loss
+
+    def train_val(advs, obs):
+      ''' Train the value function. Return loss. '''
+      feed_dict = {
+          states: obs,
+          returns: advs,
+          is_training: False
+      }
+
+      _, value_loss = sess.run(
+          [train_val_op, val_total_loss], feed_dict=feed_dict)
+      return value_loss
+
+    def summarize(advs, acs, obs):
+      '''Summarize key stats for TensorBoard. '''
+      run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+      run_metadata = tf.RunMetadata()
+      feed_dict = {
+          states: obs,
+          returns: advs,
+          actions: acs,
+          is_training: False
+      }
+
+      _, summary = sess.run([train_pol_op, summaries],
+                            feed_dict=feed_dict,
+                            options=run_options, run_metadata=run_metadata)
+
+      return summary, run_metadata
+
+    def reset():
+      ''' Reset the policy. '''
+      sess.run(tf.global_variables_initializer())
+
+    self.reset = reset
+    self.act = act
+    self.summarize = summarize
+    self.predict_val = predict_val
+    self.train_val = train_val
+    self.train_pol = train_pol
 
     self.reset()
-
-  def act(self, observation):
-    ''' Return the action output by the policy given the current
-        parameterisation.
-
-    # Params:
-      observation: The observation input to the policy
-
-    # Returns:
-      a: Action
-    '''
-    feed_dict = {self._states: observation, self._is_training: False}
-    return self._sess.run(self._sample_action, feed_dict=feed_dict)
-
-  def predict_val(self, states):
-    ''' Predict the value for given states. '''
-    feed_dict = {self._states: states, self._is_training: False}
-    return self._sess.run(self._val_pred, feed_dict=feed_dict)
-
-  def train_pol(self, returns, actions, states):
-    ''' Train the policy. Return loss. '''
-    feed_dict = {
-        self._states: states,
-        self._returns: returns,
-        self._actions: actions,
-        self._is_training: True
-    }
-
-    _, pol_loss = self._sess.run(
-        [self._train_pol_op, self._pol_total_loss], feed_dict=feed_dict)
-    return pol_loss
-
-  def train_val(self, returns, states):
-    ''' Train the value function. Return loss. '''
-    feed_dict = {
-        self._states: states,
-        self._returns: returns,
-        self._is_training: False
-    }
-
-    _, val_loss = self._sess.run(
-        [self._train_val_op, self._val_total_loss], feed_dict=feed_dict)
-    return val_loss
-
-  def summarize(self, returns, actions, states):
-    '''Summarize key stats for TensorBoard. '''
-    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-    run_metadata = tf.RunMetadata()
-    feed_dict = {
-        self._states: states,
-        self._returns: returns,
-        self._actions: actions,
-        self._is_training: False
-    }
-
-    _, summary = self._sess.run([self._train_pol_op, self._summaries],
-                                feed_dict=feed_dict,
-                                options=run_options, run_metadata=run_metadata)
-
-    return summary, run_metadata
-
-  def reset(self):
-    ''' Reset the policy. '''
-    self._sess.run(tf.global_variables_initializer())
-
+  
   def _generate_sample_action(self, states, ac_dim, std_dev, mean, ac_space):
     standard_normal = tf.random_normal(
         shape=(tf.shape(states)[0], ac_dim),
@@ -282,20 +277,20 @@ class AcPolicy(object):
 
   def _add_weights_to_regularisation_collection(self,
                                                 layer,
-                                                val_network_reg_collection):
+                                                network_reg_collection):
     weights = layer.trainable_variables
     for weight in weights:
       if 'bias' not in weight.name:
         # Don't want to regularise the biases
-        tf.add_to_collection(val_network_reg_collection, weight)
+        tf.add_to_collection(network_reg_collection, weight)
 
-        # Eligibility trace
-        # for grad, var in pol_grads_and_vars:
-        #   if grad is not None:
-        #     trace_name = var.name + '/trace'
-        #     trace = tf.get_variable(name=trace_name,
-        #                             trainable=False,
-        #                             shape=grad.get_shape(),
-        #                             initializer=tf.zeros_initializer())
-        #     grad = gamma * lmbda * trace + grad
-        #     tf.summary.histogram(trace_name, trace)
+# Eligibility trace
+# for grad, var in pol_grads_and_vars:
+#   if grad is not None:
+#     trace_name = var.name + '/trace'
+#     trace = tf.get_variable(name=trace_name,
+#                             trainable=False,
+#                             shape=grad.get_shape(),
+#                             initializer=tf.zeros_initializer())
+#     grad = gamma * lmbda * trace + grad
+#     tf.summary.histogram(trace_name, trace)

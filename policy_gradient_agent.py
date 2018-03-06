@@ -5,6 +5,7 @@ import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 
 import logger
+import utils
 from ac_policy import AcPolicy
 from runner import EpisodicRunner
 
@@ -12,7 +13,7 @@ class PolicyGradientAgent(object):
   def __init__(self, env, visualise, model_dir, max_episode_steps,
                debug, summary_every=100, future_returns=True, critic=False,
                beta=1e-3, entropy_weight=0.01, gamma=1.0,
-               tensorboard_summaries=True, learning_rate=5e-3, num_learning_steps=500,
+               no_tensorboard_summaries=False, learning_rate=5e-3, num_learning_steps=500,
                use_pol_reg_loss=False, use_pol_expl_loss=False):
 
     self._sess = tf.Session()
@@ -26,10 +27,9 @@ class PolicyGradientAgent(object):
     self._visualise = visualise
     self._critic = critic
     self._model_dir = model_dir
-    self._gamma = gamma
-    self._tensorboard_summaries = tensorboard_summaries
-    self._learning_rate = learning_rate
+    self._no_tensorboard_summaries = no_tensorboard_summaries
     self._num_learning_steps = num_learning_steps
+    self._env = env
 
     self._policy = AcPolicy(sess=self._sess,
                             ob_space=env.observation_space,
@@ -47,7 +47,7 @@ class PolicyGradientAgent(object):
                                   summary_every=summary_every,
                                   future_returns=future_returns)
 
-    if self._tensorboard_summaries:
+    if not self._no_tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
       self._summary_writer.add_graph(self._sess.graph, global_step=self._episode)
 
@@ -84,9 +84,9 @@ class PolicyGradientAgent(object):
           val = (np.std(q)+1e-4) * val / (np.std(val)+1e-4)
 
           adv = q - val
-
-          # Train critic
           val_loss = self._policy.train_val(q, states)
+        else:
+          adv = q
 
         pol_loss = self._policy.train_pol(adv, actions, states)
 
@@ -100,8 +100,11 @@ class PolicyGradientAgent(object):
           if val_loss is not None:
             logger.record_tabular('val_loss', val_loss)
           logger.dump_tabular()
+          utils.plot_value_func(self._policy,
+                                self._episode,
+                                self._env.observation_space)
 
-          if self._tensorboard_summaries:
+          if not self._no_tensorboard_summaries:
             summary, run_metadata = self._policy.summarize(
                 adv, actions, states)
             self._summary_writer.add_run_metadata(
@@ -116,9 +119,12 @@ class PolicyGradientAgent(object):
       save_model_path = os.path.join(self._model_dir, 'model.ckpt')
       self._save_model(save_model_path)
 
-      if self._tensorboard_summaries:
+      if not self._no_tensorboard_summaries:
         self._summary_writer.flush()
         self._summary_writer.close()
+  
+  def rollout(self):
+    self._runner.rollout(render=True, t_sleep=0.1)
 
   def reset_policy(self):
     self._policy.reset()

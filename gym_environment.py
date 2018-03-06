@@ -22,34 +22,35 @@ import numpy as np
 from scipy.integrate import odeint
 from scipy.stats import multivariate_normal
 
+
 class Continuous_MountainCarEnv(gym.Env):
   metadata = {
-    'render.modes': ['human', 'rgb_array'],
-    'video.frames_per_second': 30
+      'render.modes': ['human', 'rgb_array'],
+      'video.frames_per_second': 30
   }
 
   def __init__(self, gaussian_reward_scale=None, t_step=0.3, terminating=False):
-    self.min_action = -4.0        # measured in Nm
-    self.max_action = 4.0         # measured in Nm
-    self.last_action = 0.0        # measured in Nm (used for render)
-    self.min_position = -1.0      # measured in m
-    self.max_position = 1.0       # measured in m
-    self.min_velocity = -2.0      # measured in m/s
-    self.max_velocity = 2.0       # measured in m/s
+    self.min_action = -4.0              #  measured in Nm
+    self.max_action = 4.0               #  measured in Nm
+    self.last_action = 0.0              #  measured in Nm (used for render)
+    self.min_position = -1.0            #  measured in m
+    self.max_position = 1.0             #  measured in m
+    self.min_velocity = -2.0            #  measured in m/s
+    self.max_velocity = 2.0             #  measured in m/s
 
-    self.goal_position = 0.6      # measured in m
-    self.goal_velocity = 0.0      # measured in m/s
-    self.goal_position_threshold = 0.1  # measured in m
-    self.goal_velocity_threshold = 0.1  # measured in m/s
+    self.goal_position = 0.6            #  measured in m
+    self.goal_velocity = 0.0            #  measured in m/s
+    self.goal_position_threshold = 0.1  #  measured in m
+    self.goal_velocity_threshold = 0.1  #  measured in m/s
 
-    self.t_step= t_step         # measured in s
+    self.t_step = t_step                #  measured in s
 
     if gaussian_reward_scale is not None:
       self.gaussian_reward = True
       self.gaussian_reward_length_scale = gaussian_reward_scale
     else:
       self.gaussian_reward = False
-      
+
     self.terminating = terminating
 
     self.low_state = np.array([self.min_position, self.min_velocity])
@@ -57,8 +58,10 @@ class Continuous_MountainCarEnv(gym.Env):
 
     self.viewer = None
 
-    self.action_space = spaces.Box(low=self.min_action, high=self.max_action, dtype=np.float32, shape=(1,))
-    self.observation_space = spaces.Box(low=self.low_state, high=self.high_state, dtype=np.float32)
+    self.action_space = spaces.Box(
+        low=self.min_action, high=self.max_action, dtype=np.float32, shape=(1,))
+    self.observation_space = spaces.Box(
+        low=self.low_state, high=self.high_state, dtype=np.float32)
 
     self.seed()
     self.reset()
@@ -69,10 +72,11 @@ class Continuous_MountainCarEnv(gym.Env):
 
   def step(self, action):
     self.last_action = action
+
     def acceleration(current_x, action):
       G = 9.81
       return action - G * math.sin(math.atan(self._gradient(current_x)))
-    
+
     def diff(state, t, action):
       return [state[1], acceleration(state[0], action)]
 
@@ -81,13 +85,13 @@ class Continuous_MountainCarEnv(gym.Env):
     t = np.linspace(0, self.t_step, 101)
     sol = odeint(diff, self.state, t, args=(action,))
     position = np.clip(sol[-1, 0], self.min_position, self.max_position)
-    velocity  = np.clip(sol[-1, 1], self.min_velocity, self.max_velocity)
+    velocity = np.clip(sol[-1, 1], self.min_velocity, self.max_velocity)
 
-    reward, done = self._reward([position, velocity], action)
+    reward, done = self._reward([position, velocity])
     self.state = np.array([position, velocity])
 
     return self.state, reward, done, {}
-  
+
   def _done(self, next_state):
     if self.terminating:
       position, velocity = next_state
@@ -100,22 +104,21 @@ class Continuous_MountainCarEnv(gym.Env):
     else:
       return False
 
-
   def reset(self, state=None):
     if state is None:
       self.state = np.array([self.np_random.uniform(low=-0.6, high=-0.4), 0])
     else:
       self.state = state
     return np.array(self.state)
-  
-  def _reward(self, next_state, action):
+
+  def _reward(self, next_state):
     reward = 0
     done = self._done(next_state)
 
     if self.gaussian_reward:
       reward = multivariate_normal.pdf(next_state,
-                      [self.goal_position, self.goal_velocity],
-                      self.gaussian_reward_length_scale**2)
+                                       [self.goal_position, self.goal_velocity],
+                                       self.gaussian_reward_length_scale**2)
     elif done:
       reward = 100
 
@@ -148,8 +151,8 @@ class Continuous_MountainCarEnv(gym.Env):
 
     world_width = self.max_position - self.min_position
     scale = screen_width/world_width
-    carwidth=40
-    carheight=20
+    carwidth = 40
+    carheight = 20
 
     xs = np.linspace(self.min_position, self.max_position, 100)
     ys = self._height(xs)
@@ -166,19 +169,21 @@ class Continuous_MountainCarEnv(gym.Env):
 
       clearance = 10
 
-      l,r,t,b = -carwidth/2, carwidth/2, carheight, 0
-      car = rendering.FilledPolygon([(l,b), (l,t), (r,t), (r,b)])
+      l, r, t, b = -carwidth/2, carwidth/2, carheight, 0
+      car = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
       car.add_attr(rendering.Transform(translation=(0, clearance)))
       self.cartrans = rendering.Transform()
       car.add_attr(self.cartrans)
       self.viewer.add_geom(car)
       frontwheel = rendering.make_circle(carheight/2.5)
       frontwheel.set_color(.5, .5, .5)
-      frontwheel.add_attr(rendering.Transform(translation=(carwidth/4,clearance)))
+      frontwheel.add_attr(rendering.Transform(
+          translation=(carwidth/4, clearance)))
       frontwheel.add_attr(self.cartrans)
       self.viewer.add_geom(frontwheel)
       backwheel = rendering.make_circle(carheight/2.5)
-      backwheel.add_attr(rendering.Transform(translation=(-carwidth/4,clearance)))
+      backwheel.add_attr(rendering.Transform(
+          translation=(-carwidth/4, clearance)))
       backwheel.add_attr(self.cartrans)
       backwheel.set_color(.5, .5, .5)
       self.viewer.add_geom(backwheel)
@@ -187,22 +192,25 @@ class Continuous_MountainCarEnv(gym.Env):
       flagy2 = flagy1 + 50
       flagpole = rendering.Line((flagx, flagy1), (flagx, flagy2))
       self.viewer.add_geom(flagpole)
-      flag = rendering.FilledPolygon([(flagx, flagy2), (flagx, flagy2-10), (flagx+25, flagy2-5)])
-      flag.set_color(.8,.8,0)
+      flag = rendering.FilledPolygon(
+          [(flagx, flagy2), (flagx, flagy2-10), (flagx+25, flagy2-5)])
+      flag.set_color(.8, .8, 0)
       self.viewer.add_geom(flag)
-      
+
       action = rendering.Line((0, 0), (0, 50))
       self.action_trans = rendering.Transform()
       action.add_attr(self.action_trans)
       self.viewer.add_geom(action)
 
     pos = self.state[0]
-    self.cartrans.set_translation((pos-self.min_position)*scale, (self._height(pos)-min_y)*scale)
+    self.cartrans.set_translation(
+        (pos-self.min_position)*scale, (self._height(pos)-min_y)*scale)
     self.cartrans.set_rotation(self._gradient(pos))
     self.action_trans.set_translation(50, 50)
-    self.action_trans.set_rotation(np.sin(-self.last_action*np.pi/(2*self.max_action)))
+    self.action_trans.set_rotation(
+        np.sin(-self.last_action*np.pi/(2*self.max_action)))
 
-    return self.viewer.render(return_rgb_array = mode=='rgb_array')
+    return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
   def close(self):
     if self.viewer:

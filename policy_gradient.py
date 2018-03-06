@@ -1,5 +1,4 @@
 import argparse
-import time
 
 import gym
 import numpy as np
@@ -38,7 +37,7 @@ def main():
       critic=args.critic,
       future_returns=args.future_returns,
       gamma=args.gamma,
-      tensorboard_summaries=args.no_tensorboard_summaries,
+      no_tensorboard_summaries=args.no_tensorboard_summaries,
       use_pol_expl_loss=args.pol_expl_loss,
       use_pol_reg_loss=args.pol_reg_loss
       )
@@ -48,21 +47,7 @@ def main():
     try:
       agent.learn()
     finally:
-      # Run one rollout using trained agent
-      obs = env.reset()
-
-      for t_step in range(args.max_episode_steps):
-        if args.visualise:
-          env.render()
-          time.sleep(0.1)
-
-          action = agent.act(obs)
-          obs, _, done, _ = env.step(action)
-
-          if done:
-            print('Episode finished after {} timesteps'.format(t_step+1))
-            break
-
+      agent.rollout()
       env.close()
   else:
     generate_plot(agent, args.summary_every, args.exp_name)
@@ -114,8 +99,8 @@ def command_line_args():
       '--plot_learning', action='store_true',
       help='plot the learning curves with error bars (default: False)')
   parser.add_argument(
-      '--no_tensorboard_summaries', action='store_false',
-      help='store diagnostics for tensorboard (default: True)')
+      '--no_tensorboard_summaries', action='store_true',
+      help='do not store diagnostics for tensorboard (default: False)')
   parser.add_argument(
       '--pol_expl_loss', action='store_true',
       help='include exploration loss (default: False)')
@@ -179,7 +164,6 @@ def generate_plot(agent, summary_every, exp_name):
   utils.plot(mean_rewards_progress,
              std_rewards_progress,
              episode_length_progress,
-             agent._env, agent._policy,
              summary_every, exp_name)
 
 

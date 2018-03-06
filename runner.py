@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from stats import Stats
 
 class EpisodicRunner(object):
@@ -37,7 +38,7 @@ class EpisodicRunner(object):
     rollout_rewards, rollout_actions, rollout_states = [], [], []
 
     while t_steps < self._max_episode_steps:
-      rewards, actions, states = self._rollout(render=render)
+      rewards, actions, states = self.rollout(render=render)
       rollout_rewards.append(rewards)
       rollout_actions.append(actions)
       rollout_states.append(states)
@@ -57,7 +58,7 @@ class EpisodicRunner(object):
 
     return returns, actions, states
 
-  def _rollout(self, render=False):
+  def rollout(self, render=False, t_sleep=0.0):
     '''Generate a trajectory using current policy parameterisation.'''
     state = self._env.reset()
 
@@ -67,6 +68,7 @@ class EpisodicRunner(object):
 
       if render:
         self._env.render()
+        time.sleep(t_sleep)
 
       action = self._policy.act(state[np.newaxis, :])
       state, reward, done, _ = self._env.step(action)
