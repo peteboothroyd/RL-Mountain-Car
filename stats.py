@@ -31,4 +31,8 @@ class Stats(object):
     if summarise:
       self._mean_ep_length_history.append(np.mean(self._ep_length_buffer))
       self._mean_reward_history.append(np.mean(self._reward_buffer))
+  
+  def report_stats(self):
+    ''' Return the mean of the buffer of episode lengths and rewards. '''
+    return np.mean(self._ep_length_buffer), np.mean(self._reward_buffer)
       

@@ -23,7 +23,8 @@ class A2CPolicy(object):
                                  is_training,
                                  'hidden_policy_network',
                                  activation=tf.nn.tanh,
-                                 var_collection=actor_network_reg_collection)
+                                 var_collection=actor_network_reg_collection,
+                                 size=32)
 
         mean_layer = tf.layers.Dense(
             units=ac_dim,
@@ -78,7 +79,7 @@ class A2CPolicy(object):
           actor_total_loss -= actor_expl_loss
         if use_actor_reg_loss:
           actor_total_loss += actor_reg_loss
-        
+
         tf.summary.scalar('total_loss', actor_total_loss)
 
       with tf.name_scope('train_network'):
@@ -96,7 +97,8 @@ class A2CPolicy(object):
             is_training,
             'critic_hidden',
             activation=tf.nn.tanh,
-            var_collection=critic_network_reg_collection)
+            var_collection=critic_network_reg_collection,
+            size=32)
 
         dense_layer = tf.layers.Dense(
             units=1,
@@ -223,7 +225,6 @@ class A2CPolicy(object):
       n_layers=2,
       size=64,
       activation=tf.tanh,
-      kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3),
       var_collection=None
   ):
 
@@ -233,10 +234,11 @@ class A2CPolicy(object):
         layer = tf.layers.Dense(
             units=size, activation=activation,
             kernel_initializer=tf.glorot_normal_initializer(),
-            kernel_regularizer=kernel_regularizer,
             name="dense_{}".format(i))
         output = layer(output)
+
         tf.summary.histogram('dense{0}_activation'.format(i), output)
+        
         output = tf.layers.batch_normalization(output, training=is_training)
         tf.summary.histogram('dense{0}_batch_norm'.format(i), output)
 

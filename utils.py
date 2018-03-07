@@ -53,7 +53,7 @@ def plot_value_func(estimator, episode, ob_space):
   for i in range(num_points):
     for j in range(num_points):
       state = np.array([x_support[i], x_dot_support[j]]).reshape((-1, 2))
-      val = estimator.predict_val(state)
+      val = estimator.critic(state)
       predicted_vals.append(np.squeeze(val))
   predicted_vals = np.array(predicted_vals).reshape((num_points, num_points))
   x_grid, x_dot_grid = np.meshgrid(x_support, x_dot_support)

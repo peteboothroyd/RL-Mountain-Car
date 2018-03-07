@@ -13,18 +13,13 @@ def main():
   args = command_line_args()
   utils.set_global_seeds(1)
 
-  # # Create environment and agent
-  # if args.gaussian_env:
-  #   print('Using Gaussian reward')
-  #   env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
-  #       gaussian_reward_scale=0.05, t_step=0.1), max_episode_steps=1000)
-  # else:
-  env = gym.wrappers.TimeLimit(Continuous_MountainCarEnv(
-      terminating=True, t_step=0.1), max_episode_steps=1000)
+  env = Continuous_MountainCarEnv(terminating=True, t_step=0.1)
+  # env = gym.make('MountainCarContinuous-v0')
+  # env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
 
   if args.hyper_search:
     hyperparameter_search(env)
-  print(args)
+  
   agent = A2CAgent(
       env,
       visualise=args.visualise,
@@ -46,7 +41,10 @@ def main():
     finally:
       agent.rollout(0.1)
       env.close()
+  else:
     generate_plot(agent, args.summary_every, args.exp_name)
+
+def command_line_args():
   ''' Setup command line interface. '''
   parser = argparse.ArgumentParser(
       description='Uses advantage actor critic \
@@ -79,9 +77,6 @@ def main():
   parser.add_argument(
       '--future_returns', action='store_false',
       help='use only future returns for the gradient (default: True)')
-  # parser.add_argument(
-  #     '--gaussian_env', action='store_true',
-  #     help='use the gaussian reward (default: False)')
   parser.add_argument(
       '--gamma', type=float,
       help='value of gamma for Bellman equations (default: 1.0)',
@@ -91,7 +86,7 @@ def main():
       help='plot the learning curves with error bars (default: False)')
   parser.add_argument(
       '--tensorboard_summaries', action='store_true',
-      help='do not store diagnostics for tensorboard (default: False)')
+      help='store diagnostics for tensorboard (default: False)')
   parser.add_argument(
       '--actor_expl_loss', action='store_true',
       help='include exploration loss (default: False)')
@@ -103,18 +98,16 @@ def main():
 
 
 def hyperparameter_search(env):
-  entropy_weights = np.logspace(-3, -1, num=3)
-  reg_coeffs = np.logspace(-3, 0, num=3)
-  learning_rates = np.logspace(-5, -2, num=3)
+  entropy_weights = np.logspace(-4, -2, num=3)
+  reg_coeffs = np.logspace(-4, -2, num=3)
 
   for e_w in entropy_weights:
     for r_c in reg_coeffs:
-      for l_r in learning_rates:
         for actor_expl_loss in [False, True]:
           for actor_reg_loss in [False, True]:
             env.reset()
             tf.reset_default_graph()
-            directory = './tmp/ew_%s_rc_%s_lr_%s' % (e_w, r_c, l_r)
+            directory = './tmp/ew_%s_rc_%s_expl_%s_reg_%s' % (e_w, r_c, actor_expl_loss, actor_reg_loss)
             print(directory)
 
             agent = A2CAgent(env,
@@ -122,11 +115,9 @@ def hyperparameter_search(env):
                              model_dir=directory,
                              max_episode_steps=500,
                              debug=False,
-                             summary_every=25,
+                             summary_every=5,
                              future_returns=True,
-                             gamma=1.0,
                              reg_coeff=r_c,
-                             learning_rate=l_r,
                              ent_coeff=e_w,
                              use_actor_expl_loss=actor_expl_loss,
                              use_actor_reg_loss=actor_reg_loss)

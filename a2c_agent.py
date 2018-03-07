@@ -12,8 +12,8 @@ from runner import EpisodicRunner
 class A2CAgent(object):
   def __init__(self, env, visualise, model_dir, max_episode_steps,
                debug, summary_every=100, future_returns=True,
-               reg_coeff=1e-3, ent_coeff=0.01, gamma=1.0,
-               tensorboard_summaries=True, learning_rate=5e-3, num_learning_steps=500,
+               reg_coeff=1e-3, ent_coeff=0.1, gamma=1.0,
+               tensorboard_summaries=True, learning_rate=1e-4, num_learning_steps=500,
                use_actor_reg_loss=False, use_actor_expl_loss=False):
 
     self._sess = tf.Session()
@@ -36,7 +36,7 @@ class A2CAgent(object):
                             reg_coeff=reg_coeff,
                             ent_coeff=ent_coeff,
                             actor_learning_rate=learning_rate,
-                            critic_learning_rate=learning_rate,
+                            critic_learning_rate=10*learning_rate,
                             use_actor_reg_loss=use_actor_reg_loss,
                             use_actor_expl_loss=use_actor_expl_loss)
     self._runner = EpisodicRunner(policy=self._policy,
@@ -46,7 +46,7 @@ class A2CAgent(object):
                                   summary_every=summary_every,
                                   future_returns=future_returns)
 
-    if not self._no_tensorboard_summaries:
+    if self._tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
       self._summary_writer.add_graph(self._sess.graph, global_step=self._episode)
 
@@ -75,7 +75,7 @@ class A2CAgent(object):
 
         val = self._policy.critic(states).reshape((-1,))
 
-        # Change statistics of predicted values to match current rollout
+        # # Change statistics of predicted values to match current rollout
         val = val - np.mean(val) + np.mean(q)
         val = (np.std(q)+1e-4) * val / (np.std(val)+1e-4)
 
@@ -87,22 +87,30 @@ class A2CAgent(object):
           self._print_stats('actions', actions)
           self._print_stats('returns', adv)
 
+          mean_ep_length, mean_reward = self._runner.report_stats()
+
           logger.record_tabular('episode', self._episode)
           logger.record_tabular('total_timesteps', total_timesteps)
           logger.record_tabular('pol_loss', pol_loss)
           logger.record_tabular('val_loss', val_loss)
           logger.dump_tabular()
-          # get stats
-
+          
           # utils.plot_value_func(self._policy,
           #                       self._episode,
           #                       self._env.observation_space)
 
-          if not self._no_tensorboard_summaries:
+          if self._tensorboard_summaries:
             summary, run_metadata = self._policy.summarize(
                 adv, actions, states)
             self._summary_writer.add_run_metadata(
                 run_metadata, 'step%d' % self._episode)
+            self._summary_writer.add_summary(summary, self._episode)
+
+            summary = tf.Summary(value=[tf.Summary.Value(tag='episode_length',
+                                                     simple_value=mean_ep_length)])
+            self._summary_writer.add_summary(summary, self._episode)
+            summary = tf.Summary(value=[tf.Summary.Value(tag='reward',
+                                                     simple_value=mean_reward)])
             self._summary_writer.add_summary(summary, self._episode)
     except:
       # Reraise to allow early termination of learning, and display
@@ -113,12 +121,9 @@ class A2CAgent(object):
       save_model_path = os.path.join(self._model_dir, 'model.ckpt')
       self._save_model(save_model_path)
 
-      if not self._no_tensorboard_summaries:
+      if self._tensorboard_summaries:
         self._summary_writer.flush()
         self._summary_writer.close()
-  
-  def rollout(self):
-    self._runner.rollout(render=True, t_sleep=0.1)
 
   def rollout(self, t_sleep):
     self._runner.rollout(render=True, t_sleep=t_sleep)

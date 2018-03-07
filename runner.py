@@ -85,6 +85,9 @@ class EpisodicRunner(object):
     states = states.tolist()
 
     return rewards, actions, states
+  
+  def report_stats(self):
+    return self._stats.report_stats()
 
   def _compute_returns(self, rollout_rewards):
     ''' Compute the returns given a rollout of immediate rewards.

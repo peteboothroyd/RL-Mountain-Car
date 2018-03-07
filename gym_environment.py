@@ -94,12 +94,12 @@ class Continuous_MountainCarEnv(gym.Env):
   def _done(self, next_state):
     if self._terminating:
       position, velocity = next_state
-      # near_goal_position = self.goal_position - self.goal_position_threshold <= position \
-      #             and position <= self.goal_position + self.goal_position_threshold
-      # near_goal_velocity = self.goal_velocity - self.goal_velocity_threshold <= velocity \
-      #             and velocity <= self.goal_velocity + self.goal_velocity_threshold
-      # return near_goal_position and near_goal_velocity
-      return position >= self._goal_position
+      near_goal_position = self._goal_position - self._goal_position_threshold <= position \
+                  and position <= self._goal_position + self._goal_position_threshold
+      near_goal_velocity = self._goal_velocity - self._goal_velocity_threshold <= velocity \
+                  and velocity <= self._goal_velocity + self._goal_velocity_threshold
+      return near_goal_position and near_goal_velocity
+      # return position >= self._goal_position
     else:
       return False
 
