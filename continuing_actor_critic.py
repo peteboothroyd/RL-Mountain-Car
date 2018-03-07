@@ -1,25 +1,23 @@
 import tensorflow as tf
 
 
-class A2CPolicy(object):
+class ContinuingActorCritic(object):
   def __init__(self, sess, ob_space, ac_space, reg_coeff, ent_coeff,
                critic_learning_rate, actor_learning_rate,
-               use_actor_reg_loss, use_actor_expl_loss):
+               use_actor_reg_loss, use_actor_expl_loss, lmbda=0.9):
     '''Define the tensorflow graph to be used for the policy.'''
-    ob_shape = (None,) + ob_space.shape
+    ob_shape = ob_space.shape
     ac_dim = ac_space.shape[0]
 
     with tf.name_scope('inputs'):
-      returns, states, is_training, actions = self._create_input_placeholders(
+      reward, state, next_state, is_training, action = self._create_input_placeholders(
           ac_dim, ob_shape)
-      tf.summary.histogram('returns', returns)
-      normalised_returns = self._normalise(returns)
-      tf.summary.histogram('normalised_returns', normalised_returns)
+      tf.summary.scalar('advantage', advantage)
 
     with tf.name_scope('actor'):
       with tf.name_scope('action_statistics'):
         actor_network_reg_collection = 'actor_network_regularization'
-        hidden = self._build_mlp(states,
+        hidden = self._build_mlp(state,
                                  is_training,
                                  'hidden_policy_network',
                                  activation=tf.nn.tanh,
@@ -46,46 +44,55 @@ class A2CPolicy(object):
         tf.summary.scalar('std_dev', tf.squeeze(std_dev))
 
       with tf.name_scope('generate_sample_action'):
-        sample_action = self._generate_sample_action(states,
-                                                     ac_dim,
+        sample_action = self._generate_sample_action(ac_dim,
                                                      std_dev,
                                                      mean,
                                                      ac_space)
         tf.summary.histogram('sample_action', sample_action)
 
       with tf.name_scope('loss'):
-        dist = tf.contrib.distributions.MultivariateNormalDiag(
-            loc=mean, scale_diag=std_dev)
-        log_prob = dist.log_prob(actions, name='log_prob')
+        dist = tf.distributions.Normal(loc=mean, scale=std_dev)
+        log_prob = dist.log_prob(action, name='log_prob')
         # Minimising negative equivalent to maximising
-        actor_loss = tf.reduce_mean(-log_prob * normalised_returns,
-                                    name='loss')
-        tf.summary.scalar('loss', actor_loss)
 
-        actor_reg_losses = tf.get_collection(actor_network_reg_collection)
-        actor_reg_loss = tf.identity(
-            sum(tf.nn.l2_loss(reg_loss) for reg_loss in actor_reg_losses) * reg_coeff,
-            name='reg_loss')
-        tf.summary.scalar('reg_loss', actor_reg_loss)
+        # actor_reg_losses = tf.get_collection(actor_network_reg_collection)
+        # actor_reg_loss = tf.identity(
+        #     sum(tf.nn.l2_loss(reg_loss) for reg_loss in actor_reg_losses) * reg_coeff,
+        #     name='reg_loss')
+        # tf.summary.scalar('reg_loss', actor_reg_loss)
 
-        actor_expl_loss = tf.identity(tf.reduce_mean(dist.entropy()) * ent_coeff,
-                                    name='expl_loss')
-        tf.summary.scalar('expl_loss', actor_expl_loss)
+        # actor_expl_loss = tf.identity(tf.reduce_mean(dist.entropy()) * ent_coeff,
+        #                             name='expl_loss')
+        # tf.summary.scalar('expl_loss', actor_expl_loss)
 
-        actor_total_loss = actor_loss
+        # actor_total_loss = actor_loss
 
-        # TODO: Experiment with including these losses
-        if use_actor_expl_loss:
-          actor_total_loss -= actor_expl_loss
-        if use_actor_reg_loss:
-          actor_total_loss += actor_reg_loss
+        # # TODO: Experiment with including these losses
+        # if use_actor_expl_loss:
+        #   actor_total_loss -= actor_expl_loss
+        # if use_actor_reg_loss:
+        #   actor_total_loss += actor_reg_loss
 
-        tf.summary.scalar('total_loss', actor_total_loss)
+        # tf.summary.scalar('total_loss', actor_total_loss)
 
       with tf.name_scope('train_network'):
         actor_optimizer = tf.train.AdamOptimizer(actor_learning_rate)
-        actor_grads_and_vars = actor_optimizer.compute_gradients(actor_total_loss)
-        actor_grads_and_vars = self._clip_by_global_norm(actor_grads_and_vars)
+        actor_grads_and_vars = actor_optimizer.compute_gradients(log_prob)
+
+        # Eligibility trace
+        for grad, var in actor_grads_and_vars:
+          if grad is not None:
+            with tf.variable_scope('trace'):
+              trace_name = var.op.name
+              trace = tf.get_variable(name=trace_name,
+                                      trainable=False,
+                                      shape=grad.get_shape(),
+                                      initializer=tf.zeros_initializer())
+              trace = lmbda * trace + grad
+              grad = trace * advantage
+              tf.summary.histogram(trace_name, trace)
+          
+        # actor_grads_and_vars = self._clip_by_global_norm(actor_grads_and_vars)
         train_actor_op = self._train_with_batch_norm_update(
             actor_optimizer, actor_grads_and_vars)
 
@@ -93,7 +100,7 @@ class A2CPolicy(object):
       with tf.name_scope('predict'):
         critic_network_reg_collection = 'critic_network_regularization'
         critic_hidden = self._build_mlp(
-            states,
+            state,
             is_training,
             'critic_hidden',
             activation=tf.nn.tanh,
@@ -110,7 +117,7 @@ class A2CPolicy(object):
             dense_layer, critic_network_reg_collection)
 
       with tf.name_scope('loss'):
-        critic_loss = tf.nn.l2_loss(critic_pred - normalised_returns)
+        critic_loss = tf.nn.l2_loss(critic_pred - normalised_advantage)
         tf.summary.scalar('loss', critic_loss)
 
         critic_reg_losses = tf.get_collection(critic_network_reg_collection)
@@ -138,7 +145,7 @@ class A2CPolicy(object):
       # Params:
         observation: The observation input to the policy
 
-      # Returns:
+      # advantage:
         a: Action
       '''
       feed_dict = {states: obs, is_training: False}
@@ -153,7 +160,7 @@ class A2CPolicy(object):
       ''' Train the policy. Return loss. '''
       feed_dict = {
           states: obs,
-          returns: advs,
+          advantage: advs,
           actions: acs,
           is_training: True
       }
@@ -166,7 +173,7 @@ class A2CPolicy(object):
       ''' Train the value function. Return loss. '''
       feed_dict = {
           states: obs,
-          returns: advs,
+          advantage: advs,
           is_training: False
       }
 
@@ -180,7 +187,7 @@ class A2CPolicy(object):
       run_metadata = tf.RunMetadata()
       feed_dict = {
           states: obs,
-          returns: advs,
+          advantage: advs,
           actions: acs,
           is_training: False
       }
@@ -205,9 +212,9 @@ class A2CPolicy(object):
 
     self.reset()
   
-  def _generate_sample_action(self, states, ac_dim, std_dev, mean, ac_space):
+  def _generate_sample_action(self, ac_dim, std_dev, mean, ac_space):
     standard_normal = tf.random_normal(
-        shape=(tf.shape(states)[0], ac_dim),
+        shape=(ac_dim),
         name='standard_normal')
     bounded_sample = tf.nn.tanh(
         std_dev * standard_normal + mean, name='sample_action')
@@ -238,7 +245,7 @@ class A2CPolicy(object):
         output = layer(output)
 
         tf.summary.histogram('dense{0}_activation'.format(i), output)
-
+        
         output = tf.layers.batch_normalization(output, training=is_training)
         tf.summary.histogram('dense{0}_batch_norm'.format(i), output)
 
@@ -260,26 +267,16 @@ class A2CPolicy(object):
     clipped_grads, _ = tf.clip_by_global_norm(grads, norm)
     return zip(clipped_grads, variables)
 
-  def _normalise(self, x):
-    mean, var = tf.nn.moments(x, axes=[0])
-    normalised_x = tf.nn.batch_normalization(
-        x,
-        mean=mean,
-        variance=var,
-        offset=None,
-        scale=None,
-        variance_epsilon=1e-4)
-    return normalised_x
 
   def _create_input_placeholders(self, ac_dim, ob_shape):
     actions = tf.placeholder(
-        tf.float32, shape=[None, ac_dim], name='actions')
-    returns = tf.placeholder(
-        tf.float32, shape=[None], name='returns')
+        tf.float32, shape=[ac_dim], name='actions')
+    advantage = tf.placeholder(
+        tf.float32, shape=[], name='advantage')
     states = tf.placeholder(
         tf.float32, shape=ob_shape, name='obs')
     is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
-    return returns, states, is_training, actions
+    return advantage, states, is_training, actions
 
   def _add_weights_to_regularisation_collection(self,
                                                 layer,

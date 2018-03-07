@@ -28,7 +28,7 @@ class Continuous_MountainCarEnv(gym.Env):
       'video.frames_per_second': 30
   }
 
-  def __init__(self, gaussian_reward_scale=None, t_step=0.3, terminating=False):
+  def __init__(self, gaussian_reward_scale=None, t_step=0.3, terminating=False, hard=False):
     self._min_action = -4.0              #  measured in Nm
     self._max_action = 4.0               #  measured in Nm
     self._last_action = 0.0              #  measured in Nm (used for render)
@@ -51,6 +51,7 @@ class Continuous_MountainCarEnv(gym.Env):
       self._gaussian_reward = False
 
     self._terminating = terminating
+    self._hard = hard
 
     self._low_state = np.array([self._min_position, self._min_velocity])
     self._high_state = np.array([self._max_position, self._max_velocity])
@@ -94,12 +95,12 @@ class Continuous_MountainCarEnv(gym.Env):
   def _done(self, next_state):
     if self._terminating:
       position, velocity = next_state
-      near_goal_position = self._goal_position - self._goal_position_threshold <= position \
-                  and position <= self._goal_position + self._goal_position_threshold
-      near_goal_velocity = self._goal_velocity - self._goal_velocity_threshold <= velocity \
-                  and velocity <= self._goal_velocity + self._goal_velocity_threshold
-      return near_goal_position and near_goal_velocity
-      # return position >= self._goal_position
+      if self._hard:
+        near_goal_position = abs(position - self._goal_position) <= self._goal_position_threshold
+        near_goal_velocity = abs(velocity - self._goal_velocity) <= self._goal_velocity_threshold
+        return near_goal_position and near_goal_velocity
+      else:
+        return position >= self._goal_position
     else:
       return False
 
@@ -107,8 +108,8 @@ class Continuous_MountainCarEnv(gym.Env):
     if state is None:
       self._state = np.array([self._np_random.uniform(low=-0.6, high=-0.4), 0])
     else:
-      self._state = state
-    return np.array(self._state)
+      self._state = np.array(state)
+    return self._state
 
   def _reward(self, next_state):
     reward = 0

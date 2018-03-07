@@ -39,9 +39,29 @@ def plot(mean_rewards,
   plot_fig(episode_lengths, 'Episode Lengths')
 
 def plot_value_func(estimator, episode, ob_space):
-  plt.clf()
-  fig = plt.figure()
-  ax = fig.gca(projection='3d')
+  def plot(vals, x1, x2, name):
+    plt.clf()
+    fig = plt.figure()
+    ax = fig.gca(projection='3d')
+    surf = ax.plot_surface(x_grid, x_dot_grid, predicted_vals,
+                        cmap=cm.rainbow, antialiased=True, linewidth=0.001)
+
+    # Customize the z axis.
+    ax.set_zlim(np.amin(predicted_vals), np.amax(predicted_vals))
+    ax.zaxis.set_major_locator(LinearLocator(10))
+    ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
+
+    # Add a color bar which maps values to colors.
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    plt.savefig("{0}_surface_{1}.png".format(name, episode), dpi=300)
+
+    plt.clf()
+    contour = plt.contourf(x_grid, x_dot_grid, predicted_vals)
+    plt.colorbar(contour, shrink=0.5)
+    plt.savefig("{0}_contour_{1}.png".format(name, episode), dpi=300)
+
+    plt.close()
+
   num_points = 250
   x_support = np.linspace(ob_space.low[0],
                           ob_space.high[0],
@@ -49,27 +69,21 @@ def plot_value_func(estimator, episode, ob_space):
   x_dot_support = np.linspace(ob_space.low[1],
                               ob_space.high[1],
                               num=num_points)
+  x_grid, x_dot_grid = np.meshgrid(x_support, x_dot_support)
+
   predicted_vals = []
+  predicted_acs = []
+
   for i in range(num_points):
     for j in range(num_points):
       state = np.array([x_support[i], x_dot_support[j]]).reshape((-1, 2))
       val = estimator.critic(state)
+      act = estimator.actor(state)
       predicted_vals.append(np.squeeze(val))
+      predicted_acs.append(np.squeeze(act))
+
   predicted_vals = np.array(predicted_vals).reshape((num_points, num_points))
-  x_grid, x_dot_grid = np.meshgrid(x_support, x_dot_support)
-  surf = ax.plot_surface(x_grid, x_dot_grid, predicted_vals,
-                        cmap=cm.rainbow, antialiased=True, linewidth=0.001)
+  predicted_acs = np.array(predicted_acs).reshape((num_points, num_points))
 
-  # Customize the z axis.
-  ax.set_zlim(np.amin(predicted_vals), np.amax(predicted_vals))
-  ax.zaxis.set_major_locator(LinearLocator(10))
-  ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
-
-  # Add a color bar which maps values to colors.
-  fig.colorbar(surf, shrink=0.5, aspect=5)
-  plt.savefig("value_surface_{0}.png".format(episode), dpi=300)
-
-  plt.clf()
-  contour = plt.contourf(x_grid, x_dot_grid, predicted_vals)
-  plt.colorbar(contour, shrink=0.5)
-  plt.savefig("value_contour_{0}.png".format(episode), dpi=300)
+  plot(predicted_vals, x_grid, x_dot_grid, 'value')
+  plot(predicted_acs, x_grid, x_dot_grid, 'action')

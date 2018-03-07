@@ -1,6 +1,5 @@
 import argparse
 
-import gym
 import numpy as np
 import tensorflow as tf
 
@@ -14,12 +13,10 @@ def main():
   utils.set_global_seeds(1)
 
   env = Continuous_MountainCarEnv(terminating=True, t_step=0.1)
-  # env = gym.make('MountainCarContinuous-v0')
-  # env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
 
   if args.hyper_search:
     hyperparameter_search(env)
-  
+
   agent = A2CAgent(
       env,
       visualise=args.visualise,
@@ -50,7 +47,7 @@ def command_line_args():
       description='Uses advantage actor critic \
       techniques to solve the Mountain Car reinforcement learning task.')
   parser.add_argument(
-      '--visualise', '-v', action='store_true',
+      '--visualise', action='store_true',
       help='whether to visualise the graphs (default: False)')
   parser.add_argument(
       '--model_dir', type=str,
@@ -103,25 +100,25 @@ def hyperparameter_search(env):
 
   for e_w in entropy_weights:
     for r_c in reg_coeffs:
-        for actor_expl_loss in [False, True]:
-          for actor_reg_loss in [False, True]:
-            env.reset()
-            tf.reset_default_graph()
-            directory = './tmp/ew_%s_rc_%s_expl_%s_reg_%s' % (e_w, r_c, actor_expl_loss, actor_reg_loss)
-            print(directory)
+      for actor_expl_loss in [False, True]:
+        for actor_reg_loss in [False, True]:
+          env.reset()
+          tf.reset_default_graph()
+          directory = './tmp/ew_%s_rc_%s_expl_%s_reg_%s' % (e_w, r_c, actor_expl_loss, actor_reg_loss)
+          print(directory)
 
-            agent = A2CAgent(env,
-                             visualise=False,
-                             model_dir=directory,
-                             max_episode_steps=500,
-                             debug=False,
-                             summary_every=5,
-                             future_returns=True,
-                             reg_coeff=r_c,
-                             ent_coeff=e_w,
-                             use_actor_expl_loss=actor_expl_loss,
-                             use_actor_reg_loss=actor_reg_loss)
-            agent.learn()
+          agent = A2CAgent(env,
+                           visualise=False,
+                           model_dir=directory,
+                           max_episode_steps=500,
+                           debug=False,
+                           summary_every=5,
+                           future_returns=True,
+                           reg_coeff=r_c,
+                           ent_coeff=e_w,
+                           use_actor_expl_loss=actor_expl_loss,
+                           use_actor_reg_loss=actor_reg_loss)
+          agent.learn()
 
 
 def generate_plot(agent, summary_every, exp_name):

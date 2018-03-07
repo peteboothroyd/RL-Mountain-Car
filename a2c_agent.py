@@ -5,7 +5,6 @@ import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 
 import logger
-import utils
 from a2c_policy import A2CPolicy
 from runner import EpisodicRunner
 
@@ -31,14 +30,14 @@ class A2CAgent(object):
     self._env = env
 
     self._policy = A2CPolicy(sess=self._sess,
-                            ob_space=env.observation_space,
-                            ac_space=env.action_space,
-                            reg_coeff=reg_coeff,
-                            ent_coeff=ent_coeff,
-                            actor_learning_rate=learning_rate,
-                            critic_learning_rate=10*learning_rate,
-                            use_actor_reg_loss=use_actor_reg_loss,
-                            use_actor_expl_loss=use_actor_expl_loss)
+                             ob_space=env.observation_space,
+                             ac_space=env.action_space,
+                             reg_coeff=reg_coeff,
+                             ent_coeff=ent_coeff,
+                             actor_learning_rate=learning_rate,
+                             critic_learning_rate=learning_rate,
+                             use_actor_reg_loss=use_actor_reg_loss,
+                             use_actor_expl_loss=use_actor_expl_loss)
     self._runner = EpisodicRunner(policy=self._policy,
                                   env=env,
                                   max_episode_steps=max_episode_steps,
@@ -48,7 +47,8 @@ class A2CAgent(object):
 
     if self._tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
-      self._summary_writer.add_graph(self._sess.graph, global_step=self._episode)
+      self._summary_writer.add_graph(self._sess.graph,
+                                     global_step=self._episode)
 
     if not self._graph_initialized():
       raise Exception('Graph not initialised')
@@ -60,7 +60,7 @@ class A2CAgent(object):
     return self._policy.actor(observation[np.newaxis, :])
 
   def learn(self):
-    ''' Learn an optimal policy parameterisation by 
+    ''' Learn an optimal policy parameterisation by
         interacting with the environment.
     '''
     total_timesteps = 0
@@ -70,7 +70,8 @@ class A2CAgent(object):
         summarise = self._episode % self._summary_every == 0
         visualise = summarise and self._visualise
 
-        returns, actions, states = self._runner.generate_rollouts(render=visualise)
+        returns, actions, states = self._runner.generate_rollouts(
+            render=visualise)
         q = np.reshape(returns, (-1,))
 
         val = self._policy.critic(states).reshape((-1,))
@@ -93,6 +94,8 @@ class A2CAgent(object):
           logger.record_tabular('total_timesteps', total_timesteps)
           logger.record_tabular('pol_loss', pol_loss)
           logger.record_tabular('val_loss', val_loss)
+          logger.record_tabular('mean_ep_length', mean_ep_length)
+          logger.record_tabular('mean_reward', mean_reward)
           logger.dump_tabular()
           
           # utils.plot_value_func(self._policy,
