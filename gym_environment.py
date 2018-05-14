@@ -78,14 +78,31 @@ class Continuous_MountainCarEnv(gym.Env):
       return action - G * math.sin(math.atan(self._gradient(current_x)))
 
     def diff(state, t, action):
-      return [state[1], acceleration(state[0], action)]
+      speed = state[1]
+      accel = acceleration(state[0], action)
+      return [speed, accel]
 
     action = np.clip(action, self._min_action, self._max_action)
 
     t = np.linspace(0, self._t_step, 101)
     sol = odeint(diff, self._state, t, args=(action,))
-    position = np.clip(sol[-1, 0], self._min_position, self._max_position)
-    velocity = np.clip(sol[-1, 1], self._min_velocity, self._max_velocity)
+    
+    position = sol[-1, 0]
+    velocity = sol[-1, 1]
+
+    if position <= self._min_position:
+      position = self._min_position
+      velocity = 0
+    
+    if position >= self._max_position:
+      position = self._max_position
+      velocity = 0
+    
+    # if velocity >= self._max_velocity:
+    #   velocity = self._max_velocity
+    
+    # if velocity <= self._min_velocity:
+    #   velocity = self._min_velocity
 
     reward, done = self._reward([position, velocity])
     self._state = np.array([position, velocity])
@@ -131,17 +148,17 @@ class Continuous_MountainCarEnv(gym.Env):
 
   def _height(self, xs):
     def height(x):
-      if x <= 0:
-        return x**2+x
+      if x >= 0:
+        return x*(1+5*x**2)**-0.5 
       else:
-        return x*(1+5*x**2)**-0.5
+        return x**2+x
 
     height = np.vectorize(height)
     return height(xs)
 
   def _gradient(self, x):
     if x >= 0:
-      return math.pow((1 + 5 * x ** 2), -1.5)
+      return (1 + 5 * x ** 2)**-1.5
     else:
       return 2 * x + 1
 

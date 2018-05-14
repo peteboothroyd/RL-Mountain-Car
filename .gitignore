@@ -4,3 +4,7 @@
 *.pyc
 tmp/**/*
 *.jpeg
+*.json
+*.mp4
+model_out/**/*
+support_values

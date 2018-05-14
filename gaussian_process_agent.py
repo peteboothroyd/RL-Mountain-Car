@@ -2,11 +2,12 @@ import itertools
 import math
 import pickle
 
-import numpy as np
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib import cm
 from matplotlib.ticker import FormatStrFormatter, LinearLocator
+from mpl_toolkits.mplot3d import Axes3D
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 from sklearn.metrics import mean_squared_error
@@ -59,7 +60,7 @@ class GaussianProcessAgent(object):
   def initialise_support_values(self):
     for i in range(self.x_points * self.x_dot_points):
       state = self.states[i]
-      reward, _ = self.environment._reward(state, 0)
+      reward, _ = self.environment._reward(state)
       self.support_values[i][0] = reward
 
   def learn_value_function(self, states, values):
@@ -255,8 +256,8 @@ class GaussianProcessAgent(object):
         pickle.dump(self.support_values, fp)
 
   def find_max_action(self, x, x_dot):
-    target = np.array([self.environment.goal_position,
-                       self.environment.goal_velocity]).reshape((-1, 1))
+    target = np.array([self.environment._goal_position,
+                       self.environment._goal_velocity]).reshape((-1, 1))
     k_v_inv_v = self.gp_val.alpha_
 
     v_squared, l1, l2 = np.exp(self.gp_val.kernel_.theta)
@@ -285,7 +286,7 @@ class GaussianProcessAgent(object):
 
     target_minus_mean = np.subtract(target, means)
     squared_target_minus_mean = np.square(target_minus_mean)
-    var_plus = var + self.environment.gaussian_reward_length_scale ** 2
+    var_plus = var + self.environment._gaussian_reward_length_scale ** 2
     divided = np.divide(squared_target_minus_mean, var_plus)
     summed = -0.5 * np.sum(divided, axis=0)
     exponentiated = np.exp(summed)

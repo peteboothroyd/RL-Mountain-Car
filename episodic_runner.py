@@ -1,33 +1,30 @@
 import numpy as np
 import time
-from stats import Stats
+import gym
 
 class EpisodicRunner(object):
   ''' Handles executing the policy and returning trajectories of states,
       returns, and actions for episodic tasks.
   '''
-  def __init__(self,
-               policy,
-               env,
-               max_episode_steps,
-               gamma,
-               summary_every,
+  def __init__(self, policy, env, max_episode_steps, gamma, 
                future_returns=True):
+
     self._policy = policy
     self._env = env
     self._max_episode_steps = max_episode_steps
     self._future_returns = future_returns
     self._gamma = gamma
-    self._stats = Stats(summary_every)
 
-    self._num_actions = self._env.action_space.shape[0]
-    self._ob_dim = self._env.observation_space.shape[0]
+    self._discrete = isinstance(self._env.action_space, gym.spaces.Discrete)
 
-  def generate_rollouts(self, render=False, summarise=False):
+    self._act_dim = self._env.action_space.n if self._discrete \
+        else self._env.action_space.shape[0]
+    self._obs_dim = self._env.observation_space.shape[0]
+
+  def generate_rollouts(self):
     '''Generate rollouts for learning.
 
     # Params:
-      render (bool): Whether to render the rollouts
 
     # Returns:
       rollout_returns (np.array([float])): List of returns for the rollouts, (dimension [-1, 1])
@@ -38,23 +35,27 @@ class EpisodicRunner(object):
     rollout_rewards, rollout_actions, rollout_states = [], [], []
 
     while t_steps < self._max_episode_steps:
-      rewards, actions, states = self.rollout(render=render)
+      rewards, actions, states = self.rollout()
       rollout_rewards.append(rewards)
       rollout_actions.append(actions)
       rollout_states.append(states)
       t_steps += len(rewards)
 
     states = np.concatenate([np.array(state).reshape(
-        (-1, self._ob_dim)) for state in rollout_states])
-    actions = np.concatenate([np.array(action).reshape(
-        (-1, self._num_actions)) for action in rollout_actions])
-
-    self._stats.store_episode_stats(rollout_rewards, summarise)
+        (-1, self._obs_dim)) for state in rollout_states])
+    if self._discrete:
+      actions = np.concatenate([np.array(action).reshape(
+          (-1, 1)) for action in rollout_actions])
+    else:
+      actions = np.concatenate([np.array(action).reshape(
+          (-1, self._act_dim)) for action in rollout_actions])
 
     if self._future_returns:
       returns = self._compute_future_returns(rollout_rewards)
     else:
       returns = self._compute_returns(rollout_rewards)
+    
+    returns = np.concatenate([np.array(ret).reshape((-1,)) for ret in returns])
 
     return returns, actions, states
 
@@ -81,13 +82,9 @@ class EpisodicRunner(object):
 
     rewards = np.squeeze(np.array(rewards)).tolist()
     actions = np.squeeze(np.array(actions)).tolist()
-    states = np.squeeze(np.array(states))
-    states = states.tolist()
+    states = np.squeeze(np.array(states)).tolist()
 
     return rewards, actions, states
-  
-  def report_stats(self):
-    return self._stats.report_stats()
 
   def _compute_returns(self, rollout_rewards):
     ''' Compute the returns given a rollout of immediate rewards.
@@ -112,7 +109,7 @@ class EpisodicRunner(object):
 
       returns.extend(np.ones_like(rollout) * ret)
 
-    return np.array(returns).reshape((-1))
+    return np.array(returns).reshape(-1)
 
   def _compute_future_returns(self, rollout_rewards):
     ''' Compute the future returns for a given rollout of immediate rewards.

@@ -9,8 +9,9 @@ def main():
   parser = argparse.ArgumentParser(
       description='Uses Gaussian Process techniques to solve the \
       Mountain Car reinforcement learning task.')
-  parser.add_argument('--visualise', type=bool,
-                      help='whether to visualise the graphs')
+  parser.add_argument(
+      '--visualise', action='store_true',
+      help='whether to visualise the graphs (default: False)')
 
   args = parser.parse_args()
 
@@ -27,7 +28,7 @@ def main():
     action = agent.act(env.get_state())
     _, _, done, _ = env.step(action)
 
-    sleep(0.05)
+    sleep(env._t_step)
 
     if done:
       print("Episode finished after {} timesteps".format(t_step + 1))

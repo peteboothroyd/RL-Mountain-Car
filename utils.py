@@ -8,11 +8,10 @@ from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import matplotlib.pyplot as plt
 
 
-def set_global_seeds(i):
+def set_global_seeds(i=1):
   tf.set_random_seed(i)
   np.random.seed(i)
   random.seed(i)
-
 
 def plot(mean_rewards,
          std_dev_rewards,
