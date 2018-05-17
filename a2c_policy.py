@@ -2,8 +2,8 @@ import tensorflow as tf
 import numpy as np
 import gym
 
-ACTOR_NETWORK_REGULARIZATION_COLLECTION = 'actor_network_regularization'
-CRITIC_NETWORK_REGULARIZATION_COLLECTION = 'critic_network_regularization'
+ACTOR_SCOPE = 'actor'
+CRITIC_SCOPE = 'critic'
 
 
 class A2CPolicy(object):
@@ -30,45 +30,30 @@ class A2CPolicy(object):
       adv, obs, is_training, act = _create_input_placeholders(
           act_dim, obs_shape, discrete)
 
+      adv = tf.layers.batch_normalization(inputs=adv, training=is_training)
       tf.summary.histogram('advantages', adv)
-      adv = _normalise(adv)
-      tf.summary.histogram('normalised_advantages', adv)
 
-    with tf.name_scope('actor'):
+    with tf.name_scope(ACTOR_SCOPE):
       with tf.name_scope('action'):
         if cnn:
-          actor_hidden = _build_cnn(
-              obs,
-              'actor_hidden',
-              var_collection=ACTOR_NETWORK_REGULARIZATION_COLLECTION)
+          actor_hidden = _build_cnn(obs, is_training, 'actor_hidden')
         else:
           actor_hidden = _build_mlp(
-              obs,
-              is_training,
-              'actor_hidden',
-              activation=tf.nn.tanh,
-              var_collection=ACTOR_NETWORK_REGULARIZATION_COLLECTION,
-              size=64)
+              obs, is_training, 'actor_hidden', activation=tf.nn.tanh, size=64)
 
         if discrete:
-          act_layer = tf.layers.Dense(
-              units=act_dim, activation=tf.nn.relu, use_bias=True,
-              bias_initializer=tf.zeros_initializer(),
-              kernel_initializer=tf.glorot_normal_initializer())
-          act_logits = act_layer(actor_hidden)
-          tf.summary.histogram('mean', act_logits)
-        else:
-          act_mean_layer = tf.layers.Dense(
-              units=act_dim,
-              activation=None,
+          act_logits = tf.layers.dense(
+              inputs=actor_hidden, units=act_dim, activation=tf.nn.relu,
+              use_bias=True, bias_initializer=tf.zeros_initializer(),
               kernel_initializer=tf.glorot_normal_initializer(),
-              bias_initializer=tf.zeros_initializer(),
-              name='mean')
-          act_mean = act_mean_layer(actor_hidden)
+              kernel_regularizer=tf.nn.l2_loss)
+          tf.summary.histogram('act_logits', act_logits)
+        else:
+          act_mean = tf.layers.dense(
+              inputs=actor_hidden, units=act_dim, activation=None,
+              kernel_initializer=tf.glorot_normal_initializer(),
+              bias_initializer=tf.zeros_initializer(), name='mean')
           tf.summary.histogram('mean', act_mean)
-
-          _add_weights_to_regularisation_collection(
-              act_mean_layer, ACTOR_NETWORK_REGULARIZATION_COLLECTION)
 
           # Standard deviation of the normal distribution over actions
           act_std_dev = tf.get_variable(
@@ -79,36 +64,34 @@ class A2CPolicy(object):
 
         with tf.name_scope('generate_sample_action'):
           if discrete:
-            dist = tf.distributions.Categorical(logits=act_logits)
+            dist = tf.distributions.Categorical(
+                logits=act_logits, validate_args=True, name='categorical_dist')
             sample_act = dist.sample()
           else:
-            sample_act = _generate_continuous_sample_action(
-                obs, act_dim, act_std_dev, act_mean, act_space)
+            dist = tf.contrib.distributions.MultivariateNormalDiag(
+                loc=act_mean, scale_diag=act_std_dev,
+                name='multivariate_gaussian_dist')
+            sample_act = _generate_bounded_continuous_sample_action(
+                dist, act_space)
+
           tf.summary.histogram('sample_action', sample_act)
 
       with tf.name_scope('log_prob'):
         if discrete:
           log_prob = dist.log_prob(act, name='categorical_log_prob')
         else:
-          dist = tf.contrib.distributions.MultivariateNormalDiag(
-              loc=act_mean, scale_diag=act_std_dev)
           log_prob = dist.log_prob(act, name='multivariate_gaussian_log_prob')
 
       with tf.name_scope('loss'):
         # Minimising negative equivalent to maximising
         actor_loss = tf.reduce_mean(-log_prob * adv, name='loss')
-        tf.summary.scalar('loss', actor_loss)
+        tf.summary.scalar('actor_loss', actor_loss)
 
-        actor_weights = tf.get_collection(
-            ACTOR_NETWORK_REGULARIZATION_COLLECTION)
-        actor_reg_loss = tf.identity(
-            sum(tf.nn.l2_loss(weight)
-                for weight in actor_weights) * reg_coeff,
-            name='actor_reg_loss')
+        actor_reg_loss = tf.losses.get_regularization_loss(scope=ACTOR_SCOPE) \
+            * reg_coeff
         tf.summary.scalar('actor_reg_loss', actor_reg_loss)
 
-        actor_expl_loss = tf.identity(
-            tf.reduce_mean(dist.entropy()) * ent_coeff, name='actor_expl_loss')
+        actor_expl_loss = tf.reduce_mean(dist.entropy()) * ent_coeff
         tf.summary.scalar('actor_expl_loss', actor_expl_loss)
 
         actor_total_loss = actor_loss
@@ -119,7 +102,7 @@ class A2CPolicy(object):
         if use_actor_reg_loss:
           actor_total_loss += actor_reg_loss
 
-        tf.summary.scalar('total_loss', actor_total_loss)
+        tf.summary.scalar('actor_total_loss', actor_total_loss)
 
       with tf.name_scope('train_network'):
         actor_optimizer = tf.train.AdamOptimizer(actor_learning_rate)
@@ -129,40 +112,29 @@ class A2CPolicy(object):
         train_actor_op = _train_with_batch_norm_update(
             actor_optimizer, actor_grads_and_vars)
 
-    with tf.name_scope('critic'):
+    with tf.name_scope(CRITIC_SCOPE):
       with tf.name_scope('predict'):
         val = tf.placeholder(
             dtype=tf.float32, shape=[None], name='values_placeholder')
-        val = _normalise(val)
+        val = tf.layers.batch_normalization(inputs=val, training=is_training)
 
         if cnn:
-          critic_hidden = _build_cnn(
-              obs,
-              'critic_hidden',
-              var_collection=CRITIC_NETWORK_REGULARIZATION_COLLECTION)
+          critic_hidden = _build_cnn(obs, is_training, 'critic_hidden')
         else:
           critic_hidden = _build_mlp(
-              obs, is_training, 'critic_hidden', activation=tf.nn.tanh,
-              var_collection=CRITIC_NETWORK_REGULARIZATION_COLLECTION, size=64)
+              obs, is_training, 'critic_hidden', activation=tf.nn.tanh, size=64)
 
-        dense_layer = tf.layers.Dense(
-            units=1, kernel_initializer=tf.glorot_normal_initializer())
-        critic_pred = dense_layer(critic_hidden)
+        critic_pred = tf.layers.dense(
+            inputs=critic_hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
+            kernel_initializer=tf.glorot_normal_initializer())
         tf.summary.histogram('critic_pred', critic_pred)
 
-        _add_weights_to_regularisation_collection(
-            dense_layer, CRITIC_NETWORK_REGULARIZATION_COLLECTION)
-
       with tf.name_scope('critic_loss'):
-        critic_loss = tf.nn.l2_loss(critic_pred - val)
+        critic_loss = tf.reduce_mean(tf.squared_difference(critic_pred, val))
         tf.summary.scalar('critic_loss', critic_loss)
 
-        critic_weights = tf.get_collection(
-            CRITIC_NETWORK_REGULARIZATION_COLLECTION)
-        critic_reg_loss = tf.identity(
-            sum(tf.nn.l2_loss(weight)
-                for weight in critic_weights) * reg_coeff,
-            name='critic_reg_loss')
+        critic_reg_loss = tf.losses.get_regularization_loss(scope=CRITIC_SCOPE)\
+            * reg_coeff
         tf.summary.scalar('critic_reg_loss', critic_reg_loss)
 
         critic_total_loss = critic_loss + critic_reg_loss
@@ -190,8 +162,8 @@ class A2CPolicy(object):
       '''
 
       feed_dict = {
-        obs: observation,
-        is_training: False
+          obs: observation,
+          is_training: False
       }
 
       act = sess.run(sample_act, feed_dict=feed_dict)
@@ -209,8 +181,8 @@ class A2CPolicy(object):
       '''
 
       feed_dict = {
-        obs: observations,
-        is_training: False
+          obs: observations,
+          is_training: False
       }
 
       values = sess.run(critic_pred, feed_dict=feed_dict)
@@ -241,7 +213,7 @@ class A2CPolicy(object):
 
       _, critic_loss, _, actor_loss = sess.run(
           [train_critic_op, critic_total_loss,
-            train_actor_op, actor_total_loss], feed_dict=feed_dict)
+           train_actor_op, actor_total_loss], feed_dict=feed_dict)
 
       return critic_loss, actor_loss
 
@@ -284,12 +256,8 @@ class A2CPolicy(object):
     self.reset()
 
 
-def _generate_continuous_sample_action(obs, ac_dim, std_dev, mean, ac_space):
-  standard_normal = tf.random_normal(
-      shape=(tf.shape(obs)[0], ac_dim),
-      name='standard_normal')
-  bounded_sample = tf.nn.tanh(
-      std_dev * standard_normal + mean, name='sample_action')
+def _generate_bounded_continuous_sample_action(dist, ac_space):
+  bounded_sample = tf.nn.tanh(dist.sample(), name='sample_action')
   scaled_shifted_sample = bounded_sample \
       * (ac_space.high[0]-ac_space.low[0]) * 0.5 \
       + (ac_space.high[0]+ac_space.low[0]) * 0.5
@@ -298,33 +266,33 @@ def _generate_continuous_sample_action(obs, ac_dim, std_dev, mean, ac_space):
 
 
 def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
-               size=64, activation=tf.nn.relu, var_collection=None):
-  with tf.variable_scope(scope):
-    output = input_placeholder
-    for i in range(n_layers):
-      layer = tf.layers.Dense(
-          units=size, activation=activation, name="dense_{}".format(i),
-          kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
-          bias_initializer=tf.zeros_initializer())
-      output = layer(output)
-
-      tf.summary.histogram('dense{0}_activation'.format(i), output)
-
-      output = tf.layers.batch_normalization(output, training=is_training)
-      tf.summary.histogram('dense{0}_batch_norm'.format(i), output)
-
-      if var_collection is not None:
-        _add_weights_to_regularisation_collection(layer, var_collection)
-
-  return output
-
-
-def _build_cnn(input_placeholder, scope, n_layers=3, var_collection=None):
+               size=64, activation=tf.nn.relu):
   with tf.variable_scope(scope):
     hidden = input_placeholder
+    for i in range(n_layers):
+      hidden = tf.layers.dense(
+          inputs=hidden, units=size, activation=activation,
+          name="dense_{}".format(i), use_bias=True,
+          bias_initializer=tf.zeros_initializer(),
+          kernel_initializer=tf.glorot_normal_initializer(),
+          kernel_regularizer=tf.nn.l2_loss)
+
+      tf.summary.histogram('dense{0}_activation'.format(i), hidden)
+
+      hidden = tf.layers.batch_normalization(hidden, training=is_training)
+      tf.summary.histogram('dense{0}_batch_norm'.format(i), hidden)
+
+  return hidden
+
+
+def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
+  with tf.variable_scope(scope):
+    batch_norm = tf.layers.batch_normalization(
+        inputs=input_placeholder, training=is_training)
 
     for i in range(n_layers):
-      conv_layer = tf.layers.Conv2D(
+      conv = tf.layers.conv2d(
+          inputs=batch_norm,
           filters=64,
           kernel_size=[5, 5],
           padding="same",
@@ -333,27 +301,23 @@ def _build_cnn(input_placeholder, scope, n_layers=3, var_collection=None):
           use_bias=True,
           bias_initializer=tf.zeros_initializer(),
           data_format='channels_last',
-          name='conv_conv{0}'.format(i))
-      hidden = conv_layer(hidden)
-      hidden = tf.layers.max_pooling2d(
-          inputs=hidden, pool_size=[2, 2], strides=2,
+          name='conv_{0}'.format(i),
+          kernel_regularizer=tf.nn.l2_loss)
+      pool = tf.layers.max_pooling2d(
+          inputs=conv, pool_size=[2, 2], strides=2,
           name='conv_maxpool{0}'.format(i))
+      batch_norm = tf.layers.batch_normalization(
+          inputs=pool, training=is_training)
 
-      if var_collection is not None:
-        _add_weights_to_regularisation_collection(conv_layer,
-                                                  var_collection)
-    hidden = flatten_conv(hidden)
-    fc_layer = tf.layers.Dense(
-        units=256, activation=tf.nn.relu, name="conv_fc",
+    flattened = tf.layers.flatten(batch_norm)
+    dense = tf.layers.dense(
+        inputs=flattened, units=512, activation=tf.nn.relu, name="conv_fc",
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
-        bias_initializer=tf.zeros_initializer())
-    hidden = fc_layer(hidden)
+        bias_initializer=tf.zeros_initializer(),
+        kernel_regularizer=tf.nn.l2_loss)
+    out = tf.layers.batch_normalization(inputs=dense, training=is_training)
 
-    if var_collection is not None:
-      _add_weights_to_regularisation_collection(fc_layer,
-                                                var_collection)
-
-    return hidden
+    return out
 
 
 def _train_with_batch_norm_update(optimizer, grads_and_vars):
@@ -365,18 +329,10 @@ def _train_with_batch_norm_update(optimizer, grads_and_vars):
   return train_op
 
 
-def _clip_by_global_norm(grads_and_vars, norm=0.5):
+def _clip_by_global_norm(grads_and_vars, norm=5.0):
   grads, variables = zip(*grads_and_vars)
   clipped_grads, _ = tf.clip_by_global_norm(grads, norm)
   return zip(clipped_grads, variables)
-
-
-def _normalise(x):
-  mean, var = tf.nn.moments(x, axes=[0])
-  normalised_x = tf.nn.batch_normalization(x, mean=mean, variance=var,
-                                           offset=None, scale=None,
-                                           variance_epsilon=1e-4)
-  return normalised_x
 
 
 def _create_input_placeholders(act_dim, obs_shape, discrete):
@@ -393,21 +349,3 @@ def _create_input_placeholders(act_dim, obs_shape, discrete):
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
 
   return adv, obs, is_training, act
-
-
-def _add_weights_to_regularisation_collection(layer, reg_collection):
-  weights = layer.trainable_variables
-  for weight in weights:
-    # Generally don't want to regularise the biases
-    if 'bias' not in weight.name:
-      tf.add_to_collection(reg_collection, weight)
-
-
-def flatten_conv(conv_output):
-  ''' Flattens the output of a convolutional layer to feed into a
-      dense layer.
-  '''
-  num_elems = np.prod([dim.value for dim in conv_output.get_shape()[1:]])
-  flattened = tf.reshape(conv_output, [-1, num_elems])
-
-  return flattened

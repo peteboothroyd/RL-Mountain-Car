@@ -38,7 +38,7 @@ class A2CRunner(object):
       values = self._policy.critic(self._obs)
       observations, rewards, dones, _ = self._env.step(actions)
       rollout_rewards.append(rewards)
-      rollout_values.append(values)
+      rollout_values.append(np.squeeze(values))
       rollout_observations.append(np.copy(self._obs))
       rollout_actions.append(actions)
       rollout_dones.append(dones)
@@ -79,7 +79,7 @@ class A2CRunner(object):
       values: ([[float]]): List of values (dimension [n_steps, n_envs])
 
     # Returns:
-      returns ([tf.float32]): List of returns from that timestep onwards
+      returns ([float]): List of returns from that timestep onwards
           $\sum_{h=t}^{T-1}r_h$ (dimension [n_steps, n_envs])
     '''
     returns = []
@@ -99,8 +99,12 @@ class A2CRunner(object):
         # If the last step in the rollout is not terminal, the unbiased estimate
         # of the return is the state value.
         if i == 0 and not done:
-          running_sum = val[0]
-        running_sum = reward + self._gamma * running_sum if not done else 0
+          running_sum = val + reward
+        elif not done:
+          running_sum = reward + self._gamma * running_sum
+        else:
+          running_sum = reward
+
         rollout_returns.append(running_sum)
 
       rollout_returns = list(reversed(rollout_returns))

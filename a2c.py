@@ -77,7 +77,7 @@ def command_line_args():
   parser.add_argument(
       '--summary_every', type=int, help='summary every n episodes', default=25)
   parser.add_argument(
-      '--gamma', type=float, default=1.0,
+      '--gamma', type=float, default=0.99,
       help='value of gamma for Bellman equations')
   parser.add_argument(
       '--tensorboard_summaries', action='store_true',
