@@ -82,7 +82,7 @@ def command_line_args():
       '--gamma', type=float, default=0.99,
       help='value of gamma for Bellman equations')
   parser.add_argument(
-      '--tensorboard_summaries', action='store_true',
+      '--tensorboard_summaries', action='store_false',
       help='store diagnostics for tensorboard')
   parser.add_argument(
       '--actor_expl_loss', action='store_false',
