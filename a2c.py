@@ -83,7 +83,8 @@ def command_line_args():
       '--tensorboard_summaries', action='store_true',
       help='store diagnostics for tensorboard')
   parser.add_argument(
-      '--actor_expl_loss', action='store_false', help='include exploration loss')
+      '--actor_expl_loss', action='store_false',
+      help='include exploration loss')
   parser.add_argument(
       '--actor_reg_loss', action='store_false',
       help='include regularisation loss')

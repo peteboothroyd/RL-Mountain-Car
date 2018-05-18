@@ -21,6 +21,12 @@ class A2CPolicy(object):
                critic_learning_rate, actor_learning_rate,
                use_actor_reg_loss, use_actor_expl_loss, cnn):
 
+    #TODO: Remove this if batch normalisation works
+    self._val_mean = 0
+    self._val_std_dev = 1
+    self._adv_mean = 0
+    self._adv_std_dev = 1
+
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
     obs_shape = obs_space.shape
@@ -30,6 +36,7 @@ class A2CPolicy(object):
       adv, obs, is_training, act = _create_input_placeholders(
           act_dim, obs_shape, discrete)
 
+      #TODO: Normalise these
       adv = tf.layers.batch_normalization(inputs=adv, training=is_training)
       tf.summary.histogram('advantages', adv)
 
@@ -115,7 +122,9 @@ class A2CPolicy(object):
     with tf.name_scope(CRITIC_SCOPE):
       with tf.name_scope('predict'):
         val = tf.placeholder(
-            dtype=tf.float32, shape=[None], name='values_placeholder')
+            dtype=tf.float32, shape=[None, 1], name='values_placeholder')
+
+        #TODO: Normalise these  
         val = tf.layers.batch_normalization(inputs=val, training=is_training)
 
         if cnn:
@@ -187,6 +196,11 @@ class A2CPolicy(object):
 
       values = sess.run(critic_pred, feed_dict=feed_dict)
 
+      #TODO: REMOVE THIS?
+      #Change statistics
+      values = values - np.mean(values) + self._val_mean
+      values = self._val_std_dev * values / (np.std(values)+1e-4)
+
       return values
 
     def train(value_targets, observations, advantages, actions):
@@ -202,6 +216,16 @@ class A2CPolicy(object):
         critic_loss: The loss for the critic predictions
         actor_loss: The loss for the actor
       '''
+
+      #TODO: Remove this if batch normalisation works
+      EMA_COEFF = 0.99
+      self._val_mean = EMA_COEFF * self._val_mean + (1-EMA_COEFF)*np.mean(value_targets)
+      self._val_std_dev = EMA_COEFF * self._val_std_dev + (1-EMA_COEFF)*np.std(value_targets)
+      value_targets = (value_targets - self._val_mean)/(1e-4+self._val_std_dev)
+      self._adv_mean = EMA_COEFF * self._adv_mean + (1-EMA_COEFF)*np.mean(advantages)
+      self._adv_std_dev = EMA_COEFF * self._adv_std_dev + (1-EMA_COEFF)*np.std(advantages)
+      advantages = (advantages - self._adv_mean)/(1e-4+self._adv_std_dev)
+      ### END TODO ###
 
       feed_dict = {
           obs: observations,
@@ -227,8 +251,6 @@ class A2CPolicy(object):
         value_targets:  List of returns from a rollout
       '''
 
-      # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-      # run_metadata = tf.RunMetadata()
       feed_dict = {
           obs: observations,
           val: value_targets,
@@ -239,7 +261,6 @@ class A2CPolicy(object):
 
       _, _, summary = sess.run(
           [train_critic_op, train_actor_op, summaries], feed_dict=feed_dict)
-      # options=run_options, run_metadata=run_metadata
 
       return summary
 
@@ -343,7 +364,7 @@ def _create_input_placeholders(act_dim, obs_shape, discrete):
         dtype=tf.float32, shape=[None, act_dim], name='act')
 
   adv = tf.placeholder(
-      dtype=tf.float32, shape=[None], name='adv')
+      dtype=tf.float32, shape=[None, 1], name='adv')
   obs = tf.placeholder(
       dtype=tf.float32, shape=(None,)+obs_shape, name='obs')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')

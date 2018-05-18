@@ -58,11 +58,7 @@ class A2CRunner(object):
     rollout_actions = rollout_actions.flatten()
     rollout_values = rollout_values.flatten()
     rollout_returns = rollout_returns.flatten()
-
-    # Change statistics of predicted values to match current rollout
-    values = values - np.mean(values) + np.mean(rollout_returns)
-    values = (np.std(rollout_returns)+1e-4) * values / (np.std(values)+1e-4)
-
+    
     return rollout_returns, rollout_actions, \
         rollout_observations, rollout_values
 
