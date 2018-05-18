@@ -37,7 +37,7 @@ class A2CPolicy(object):
           act_dim, obs_shape, discrete)
 
       #TODO: Normalise these
-      adv = tf.layers.batch_normalization(inputs=adv, training=is_training)
+      adv = tf.layers.batch_normalization(inputs=adv, training=is_training, renorm=True)
       tf.summary.histogram('advantages', adv)
 
     with tf.name_scope(ACTOR_SCOPE):
@@ -124,8 +124,8 @@ class A2CPolicy(object):
         val = tf.placeholder(
             dtype=tf.float32, shape=[None, 1], name='values_placeholder')
 
-        #TODO: Normalise these  
-        val = tf.layers.batch_normalization(inputs=val, training=is_training)
+        val_batch_norm = tf.layers.BatchNormalization(renorm=True)
+        val = val_batch_norm(val, training=is_training)
 
         if cnn:
           critic_hidden = _build_cnn(obs, is_training, 'critic_hidden')
@@ -136,6 +136,10 @@ class A2CPolicy(object):
         critic_pred = tf.layers.dense(
             inputs=critic_hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
             kernel_initializer=tf.glorot_normal_initializer())
+        
+        #TODO: Check this works
+        critic_pred = (critic_pred - val_batch_norm.moving_mean) / (tf.sqrt(val_batch_norm.moving_variance)+1e-4)
+        
         tf.summary.histogram('critic_pred', critic_pred)
 
       with tf.name_scope('critic_loss'):
@@ -198,8 +202,8 @@ class A2CPolicy(object):
 
       #TODO: REMOVE THIS?
       #Change statistics
-      values = values - np.mean(values) + self._val_mean
-      values = self._val_std_dev * values / (np.std(values)+1e-4)
+      # values = values - np.mean(values) + self._val_mean
+      # values = self._val_std_dev * values / (np.std(values)+1e-4)
 
       return values
 
@@ -218,13 +222,13 @@ class A2CPolicy(object):
       '''
 
       #TODO: Remove this if batch normalisation works
-      EMA_COEFF = 0.99
-      self._val_mean = EMA_COEFF * self._val_mean + (1-EMA_COEFF)*np.mean(value_targets)
-      self._val_std_dev = EMA_COEFF * self._val_std_dev + (1-EMA_COEFF)*np.std(value_targets)
-      value_targets = (value_targets - self._val_mean)/(1e-4+self._val_std_dev)
-      self._adv_mean = EMA_COEFF * self._adv_mean + (1-EMA_COEFF)*np.mean(advantages)
-      self._adv_std_dev = EMA_COEFF * self._adv_std_dev + (1-EMA_COEFF)*np.std(advantages)
-      advantages = (advantages - self._adv_mean)/(1e-4+self._adv_std_dev)
+      # EMA_COEFF = 0.99
+      # self._val_mean = EMA_COEFF * self._val_mean + (1-EMA_COEFF)*np.mean(value_targets)
+      # self._val_std_dev = EMA_COEFF * self._val_std_dev + (1-EMA_COEFF)*np.std(value_targets)
+      # value_targets = (value_targets - self._val_mean)/(1e-4+self._val_std_dev)
+      # self._adv_mean = EMA_COEFF * self._adv_mean + (1-EMA_COEFF)*np.mean(advantages)
+      # self._adv_std_dev = EMA_COEFF * self._adv_std_dev + (1-EMA_COEFF)*np.std(advantages)
+      # advantages = (advantages - self._adv_mean)/(1e-4+self._adv_std_dev)
       ### END TODO ###
 
       feed_dict = {
@@ -300,7 +304,8 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
 
       tf.summary.histogram('dense{0}_activation'.format(i), hidden)
 
-      hidden = tf.layers.batch_normalization(hidden, training=is_training)
+      hidden = tf.layers.batch_normalization(
+          hidden, training=is_training, renorm=True)
       tf.summary.histogram('dense{0}_batch_norm'.format(i), hidden)
 
   return hidden
@@ -309,7 +314,7 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
 def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
   with tf.variable_scope(scope):
     batch_norm = tf.layers.batch_normalization(
-        inputs=input_placeholder, training=is_training)
+        inputs=input_placeholder, training=is_training, renorm=True)
 
     for i in range(n_layers):
       conv = tf.layers.conv2d(
@@ -328,7 +333,7 @@ def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
           inputs=conv, pool_size=[2, 2], strides=2,
           name='conv_maxpool{0}'.format(i))
       batch_norm = tf.layers.batch_normalization(
-          inputs=pool, training=is_training)
+          inputs=pool, training=is_training, renorm=True)
 
     flattened = tf.layers.flatten(batch_norm)
     dense = tf.layers.dense(
@@ -336,7 +341,8 @@ def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
         bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
-    out = tf.layers.batch_normalization(inputs=dense, training=is_training)
+    out = tf.layers.batch_normalization(
+      inputs=dense, training=is_training, renorm=True)
 
     return out
 

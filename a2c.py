@@ -1,17 +1,19 @@
 import argparse
 import datetime
+import os
 
 import numpy as np
 import tensorflow as tf
-
-from baselines.common.cmd_util import make_atari_env
-from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 from gym.wrappers import Monitor
-from baselines import logger
 
+from a2c_agent import A2CAgent
+from baselines import logger
+from baselines.common import set_global_seeds
+from baselines.common.atari_wrappers import make_atari, wrap_deepmind
+from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
+from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 # from utils import plot
 from gym_environment import Continuous_MountainCarEnv
-from a2c_agent import A2CAgent
 
 # Environment ids
 MOUNTAIN_CAR_ID = 'mountain_car'
@@ -105,6 +107,30 @@ def command_line_args():
   parser.add_argument(
       '--seed', help='The random number generator seed', default=1, type=int)
   return parser.parse_args()
+
+def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
+  """
+  Create a wrapped, monitored SubprocVecEnv for Atari. Note this is altered from
+  the OpenAI baselines repo: 
+  https://github.com/openai/baselines/blob/master/baselines/common/cmd_util.py
+  This version changes the Monitor to the OpenAI gym monitor, for recording
+  video and statistics.
+  """
+  if wrapper_kwargs is None: wrapper_kwargs = {}
+  def make_env(rank):
+    def render_video(episode_id):
+      print('Monitor: current episode id: {0}'.format(episode_id))
+      return episode_id % 100 == 0
+    def _thunk():
+      env = make_atari(env_id)
+      env.seed(seed + rank)
+      env = Monitor(
+          env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
+          video_callable=render_video)
+      return wrap_deepmind(env, **wrapper_kwargs)
+    return _thunk
+  set_global_seeds(seed)
+  return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)])
 
 if __name__ == '__main__':
   main()
