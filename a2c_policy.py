@@ -21,12 +21,6 @@ class A2CPolicy(object):
                critic_learning_rate, actor_learning_rate,
                use_actor_reg_loss, use_actor_expl_loss, cnn):
 
-    # TODO: Remove this if batch (re)normalisation works
-    # self._val_mean = 0
-    # self._val_std_dev = 1
-    # self._adv_mean = 0
-    # self._adv_std_dev = 1
-
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
     obs_shape = obs_space.shape
@@ -36,10 +30,9 @@ class A2CPolicy(object):
       adv, obs, is_training, act = _create_input_placeholders(
           act_dim, obs_shape, discrete)
 
-      # TODO: Normalise these
-      adv = tf.layers.batch_normalization(
+      normalised_adv = tf.layers.batch_normalization(
           inputs=adv, training=is_training, renorm=True)
-      tf.summary.histogram('advantages', adv)
+      tf.summary.histogram('advantages', normalised_adv)
 
     with tf.variable_scope(ACTOR_SCOPE):
       with tf.name_scope('action'):
@@ -92,7 +85,7 @@ class A2CPolicy(object):
 
       with tf.name_scope('loss'):
         # Minimising negative equivalent to maximising
-        actor_loss = tf.reduce_mean(-log_prob * adv, name='loss')
+        actor_loss = tf.reduce_mean(-log_prob * normalised_adv, name='loss')
         tf.summary.scalar('actor_loss', actor_loss)
 
         actor_reg_loss = tf.losses.get_regularization_loss(scope=ACTOR_SCOPE) \
@@ -125,7 +118,7 @@ class A2CPolicy(object):
             dtype=tf.float32, shape=[None, 1], name='values_placeholder')
 
         val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-        val = val_batch_norm(val, training=is_training)
+        normalised_val = val_batch_norm(val, training=is_training)
 
         if cnn:
           critic_hidden = _build_cnn(obs, is_training, 'critic_hidden')
@@ -137,7 +130,7 @@ class A2CPolicy(object):
             inputs=critic_hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
             kernel_initializer=tf.glorot_normal_initializer())
 
-        # TODO: Check this works
+        # Rescale value predictions based on calculated moments of returns
         critic_pred_mu, critic_pred_var = tf.nn.moments(critic_pred, axes=[0])
         critic_pred = critic_pred - critic_pred_mu + val_batch_norm.moving_mean
         critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
@@ -146,7 +139,8 @@ class A2CPolicy(object):
         tf.summary.histogram('critic_pred', critic_pred)
 
       with tf.name_scope('critic_loss'):
-        critic_loss = tf.reduce_mean(tf.squared_difference(critic_pred, val))
+        critic_loss = tf.reduce_mean(tf.squared_difference(
+            critic_pred, normalised_val))
         tf.summary.scalar('critic_loss', critic_loss)
 
         critic_reg_loss = tf.losses.get_regularization_loss(scope=CRITIC_SCOPE)\
@@ -203,11 +197,6 @@ class A2CPolicy(object):
 
       values = sess.run(critic_pred, feed_dict=feed_dict)
 
-      # TODO: REMOVE THIS?
-      # Change statistics
-      # values = values - np.mean(values) + self._val_mean
-      # values = self._val_std_dev * values / (np.std(values)+1e-4)
-
       return values
 
     def train(value_targets, observations, advantages, actions):
@@ -223,19 +212,6 @@ class A2CPolicy(object):
         critic_loss: The loss for the critic predictions
         actor_loss: The loss for the actor
       '''
-
-      # TODO: Remove this if batch normalisation works
-      # EMA_COEFF = 0.99
-      # self._val_mean = EMA_COEFF * self._val_mean + (1-EMA_COEFF)*np.mean(value_targets)
-      # self._val_std_dev = EMA_COEFF * self._val_std_dev + (1-EMA_COEFF)*np.std(value_targets)
-      # value_targets = (value_targets - self._val_mean)/(1e-4+self._val_std_dev)
-      # self._adv_mean = EMA_COEFF * self._adv_mean + (1-EMA_COEFF)*np.mean(advantages)
-      # self._adv_std_dev = EMA_COEFF * self._adv_std_dev + (1-EMA_COEFF)*np.std(advantages)
-      # advantages = (advantages - self._adv_mean)/(1e-4+self._adv_std_dev)
-      ### END TODO ###
-
-      print('advantages:', advantages.dtype, advantages.shape)
-      print('value_targets:', value_targets.dtype, value_targets.shape)
 
       feed_dict = {
           obs: observations,
