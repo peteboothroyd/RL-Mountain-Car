@@ -21,11 +21,11 @@ class A2CPolicy(object):
                critic_learning_rate, actor_learning_rate,
                use_actor_reg_loss, use_actor_expl_loss, cnn):
 
-    #TODO: Remove this if batch normalisation works
-    self._val_mean = 0
-    self._val_std_dev = 1
-    self._adv_mean = 0
-    self._adv_std_dev = 1
+    # TODO: Remove this if batch (re)normalisation works
+    # self._val_mean = 0
+    # self._val_std_dev = 1
+    # self._adv_mean = 0
+    # self._adv_std_dev = 1
 
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
@@ -36,11 +36,12 @@ class A2CPolicy(object):
       adv, obs, is_training, act = _create_input_placeholders(
           act_dim, obs_shape, discrete)
 
-      #TODO: Normalise these
-      adv = tf.layers.batch_normalization(inputs=adv, training=is_training, renorm=True)
+      # TODO: Normalise these
+      adv = tf.layers.batch_normalization(
+          inputs=adv, training=is_training, renorm=True)
       tf.summary.histogram('advantages', adv)
 
-    with tf.name_scope(ACTOR_SCOPE):
+    with tf.variable_scope(ACTOR_SCOPE):
       with tf.name_scope('action'):
         if cnn:
           actor_hidden = _build_cnn(obs, is_training, 'actor_hidden')
@@ -103,7 +104,6 @@ class A2CPolicy(object):
 
         actor_total_loss = actor_loss
 
-        # TODO: Experiment with including these losses
         if use_actor_expl_loss:
           actor_total_loss -= actor_expl_loss
         if use_actor_reg_loss:
@@ -119,7 +119,7 @@ class A2CPolicy(object):
         train_actor_op = _train_with_batch_norm_update(
             actor_optimizer, actor_grads_and_vars)
 
-    with tf.name_scope(CRITIC_SCOPE):
+    with tf.variable_scope(CRITIC_SCOPE):
       with tf.name_scope('predict'):
         val = tf.placeholder(
             dtype=tf.float32, shape=[None, 1], name='values_placeholder')
@@ -136,10 +136,13 @@ class A2CPolicy(object):
         critic_pred = tf.layers.dense(
             inputs=critic_hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
             kernel_initializer=tf.glorot_normal_initializer())
-        
-        #TODO: Check this works
-        critic_pred = (critic_pred - val_batch_norm.moving_mean) / (tf.sqrt(val_batch_norm.moving_variance)+1e-4)
-        
+
+        # TODO: Check this works
+        critic_pred_mu, critic_pred_var = tf.nn.moments(critic_pred, axes=[0])
+        critic_pred = critic_pred - critic_pred_mu + val_batch_norm.moving_mean
+        critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
+            / (tf.sqrt(critic_pred_var)+1e-4)
+
         tf.summary.histogram('critic_pred', critic_pred)
 
       with tf.name_scope('critic_loss'):
@@ -200,8 +203,8 @@ class A2CPolicy(object):
 
       values = sess.run(critic_pred, feed_dict=feed_dict)
 
-      #TODO: REMOVE THIS?
-      #Change statistics
+      # TODO: REMOVE THIS?
+      # Change statistics
       # values = values - np.mean(values) + self._val_mean
       # values = self._val_std_dev * values / (np.std(values)+1e-4)
 
@@ -221,7 +224,7 @@ class A2CPolicy(object):
         actor_loss: The loss for the actor
       '''
 
-      #TODO: Remove this if batch normalisation works
+      # TODO: Remove this if batch normalisation works
       # EMA_COEFF = 0.99
       # self._val_mean = EMA_COEFF * self._val_mean + (1-EMA_COEFF)*np.mean(value_targets)
       # self._val_std_dev = EMA_COEFF * self._val_std_dev + (1-EMA_COEFF)*np.std(value_targets)
@@ -230,6 +233,9 @@ class A2CPolicy(object):
       # self._adv_std_dev = EMA_COEFF * self._adv_std_dev + (1-EMA_COEFF)*np.std(advantages)
       # advantages = (advantages - self._adv_mean)/(1e-4+self._adv_std_dev)
       ### END TODO ###
+
+      print('advantages:', advantages.dtype, advantages.shape)
+      print('value_targets:', value_targets.dtype, value_targets.shape)
 
       feed_dict = {
           obs: observations,
@@ -342,7 +348,7 @@ def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
         bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
     out = tf.layers.batch_normalization(
-      inputs=dense, training=is_training, renorm=True)
+        inputs=dense, training=is_training, renorm=True)
 
     return out
 

@@ -56,9 +56,9 @@ class A2CRunner(object):
         rollout_rewards, rollout_dones, rollout_values)
 
     rollout_actions = rollout_actions.flatten()
-    rollout_values = rollout_values.flatten()
-    rollout_returns = rollout_returns.flatten()
-    
+    rollout_values = rollout_values.reshape(-1, 1)
+    rollout_returns = rollout_returns.reshape(-1, 1)
+
     return rollout_returns, rollout_actions, \
         rollout_observations, rollout_values
 
