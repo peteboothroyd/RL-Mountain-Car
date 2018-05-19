@@ -12,10 +12,9 @@ from a2c_runner import A2CRunner
 
 
 class A2CAgent(object):
-  def __init__(self, env, model_dir, n_steps, debug, gamma, use_actor_reg_loss,
-               summary_every, num_learning_steps, seed, use_actor_expl_loss,
-               cnn, tensorboard_summaries, reg_coeff=1e-3, ent_coeff=0.01,
-               actor_learning_rate=1e-4, critic_learning_rate=1e-3):
+  def __init__(self, env, model_dir, n_steps, debug, gamma,
+               summary_every, num_learning_steps, seed,
+               cnn, tensorboard_summaries, reg_coeff=1e-3, ent_coeff=0.01):
 
     self._sess = tf.Session()
     self._step = 0
@@ -33,10 +32,7 @@ class A2CAgent(object):
 
     self._policy = A2CPolicy(
         sess=self._sess, obs_space=env.observation_space, cnn=cnn,
-        act_space=env.action_space, use_actor_expl_loss=use_actor_expl_loss,
-        actor_learning_rate=actor_learning_rate, reg_coeff=reg_coeff,
-        critic_learning_rate=critic_learning_rate, ent_coeff=ent_coeff,
-        use_actor_reg_loss=use_actor_reg_loss)
+        act_space=env.action_space, reg_coeff=reg_coeff, ent_coeff=ent_coeff)
     self._runner = A2CRunner(
         policy=self._policy, env=env, n_steps=n_steps, gamma=gamma)
 
