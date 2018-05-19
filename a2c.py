@@ -47,8 +47,6 @@ def main():
       summary_every=args.summary_every,
       gamma=args.gamma,
       tensorboard_summaries=args.tensorboard_summaries,
-      use_actor_expl_loss=args.actor_expl_loss,
-      use_actor_reg_loss=args.actor_reg_loss,
       cnn=cnn,
       seed=args.seed)
 
