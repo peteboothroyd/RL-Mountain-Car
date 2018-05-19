@@ -69,16 +69,15 @@ class A2CAgent(object):
         n_seconds = time.time()-start_time
 
         advantages = returns - values
-        
-        val_loss, pol_loss = self._policy.train(
+
+        loss = self._policy.train(
             returns, observations, advantages, actions)
 
         if summarise:
           logger.record_tabular('seconds', n_seconds)
           logger.record_tabular('step', self._step)
           logger.record_tabular('total_timesteps', total_timesteps)
-          logger.record_tabular('pol_loss', pol_loss)
-          logger.record_tabular('val_loss', val_loss)
+          logger.record_tabular('loss', loss)
           logger.dump_tabular()
 
           if self._tensorboard_summaries:
