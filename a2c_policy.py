@@ -105,21 +105,23 @@ class A2CPolicy(object):
 
     with tf.name_scope('loss'):
       # Minimising negative equivalent to maximising
-      actor_pg_loss = tf.reduce_mean(-log_prob * adv, name='loss') #normalised_adv
+      # normalised_adv
+      actor_pg_loss = tf.reduce_mean(-log_prob * adv, name='loss')
       tf.summary.scalar('actor_pg_loss', actor_pg_loss)
       ent = tf.reduce_mean(dist.entropy())
       tf.summary.scalar('actor_entropy', ent)
       actor_expl_loss = ent * ent_coeff
       tf.summary.scalar('actor_expl_loss', actor_expl_loss)
-      actor_total_loss =actor_pg_loss - actor_expl_loss
+      actor_total_loss = actor_pg_loss - actor_expl_loss
 
-      critic_loss = tf.reduce_mean(tf.square(critic_pred - val))/2 #normalised_val
+      critic_loss = tf.reduce_mean(
+          tf.square(critic_pred - val))/2  # normalised_val
       tf.summary.scalar('critic_loss', critic_loss)
 
       reg_loss = tf.losses.get_regularization_loss() * reg_coeff
       tf.summary.scalar('reg_loss', reg_loss)
 
-      total_loss = actor_total_loss + 0.5 * critic_loss #+ reg_loss
+      total_loss = actor_total_loss + 0.5 * critic_loss  # + reg_loss
 
       tf.summary.scalar('total_loss', total_loss)
 
@@ -218,14 +220,13 @@ class A2CPolicy(object):
           adv: advantages,
           act: actions,
           is_training: True,
-          learning_rate: cur_lr
+          lrt: cur_lr
       }
 
       _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy = \
-          sess.run(
-              [train_op, actor_pg_loss, critic_loss,
-                  actor_expl_loss, reg_loss, ent],
-              feed_dict=feed_dict)
+          sess.run([train_op, actor_pg_loss, critic_loss,
+                    actor_expl_loss, reg_loss, ent],
+                   feed_dict=feed_dict)
 
       return pg_loss, val_loss, exploration_loss, regularization_loss, entropy
 
