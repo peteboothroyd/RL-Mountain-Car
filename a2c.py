@@ -80,7 +80,7 @@ def command_line_args():
       '--gamma', type=float, default=0.99,
       help='value of gamma for Bellman equations')
   parser.add_argument(
-      '--tensorboard_summaries', action='store_false',
+      '--tensorboard_summaries', action='store_true',
       help='store diagnostics for tensorboard')
   parser.add_argument(
       '--actor_expl_loss', action='store_false',
@@ -101,7 +101,7 @@ def command_line_args():
         the policy.')
   parser.add_argument(
       '--num_env',
-      help="The number of different environments", type=int, default=8)
+      help="The number of different environments", type=int, default=16)
   parser.add_argument(
       '--seed', help='The random number generator seed', default=1, type=int)
   return parser.parse_args()
@@ -109,7 +109,7 @@ def command_line_args():
 def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   """
   Create a wrapped, monitored SubprocVecEnv for Atari. Note this is altered from
-  the OpenAI baselines repo: 
+  the OpenAI baselines repo:
   https://github.com/openai/baselines/blob/master/baselines/common/cmd_util.py
   This version changes the Monitor to the OpenAI gym monitor, for recording
   video and statistics.

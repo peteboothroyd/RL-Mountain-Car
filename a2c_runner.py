@@ -7,14 +7,17 @@ class A2CRunner(object):
       # Note
         env must be descended from the Vector
   '''
-  def __init__(self, policy, env, n_steps, gamma):
+  def __init__(self, policy, env, n_steps, gamma, discrete):
+    n_envs = env.num_envs
     self._policy = policy
     self._env = env
     self._n_steps = n_steps
     self._gamma = gamma
+    self._discrete = discrete
 
-    self._batch_obs_shape = (self._n_steps*self._env.num_envs,) \
+    self._batch_obs_shape = (n_steps*n_envs,) \
         + self._env.observation_space.shape
+    self._dones = [False for _ in range(n_envs)]
 
     self._obs = self._env.reset()
 
@@ -34,26 +37,28 @@ class A2CRunner(object):
     rollout_dones, rollout_values = [], []
 
     for _ in range(self._n_steps):
-      actions = self._policy.actor(self._obs)
-      values = self._policy.critic(self._obs)
-      observations, rewards, dones, _ = self._env.step(actions)
+      actions, values = self._policy.step(self._obs)
+      rollout_dones.append(self._dones)
+      self._obs, rewards, self._dones, _ = self._env.step(actions)
       rollout_rewards.append(rewards)
       rollout_values.append(np.squeeze(values))
       rollout_observations.append(np.copy(self._obs))
       rollout_actions.append(actions)
-      rollout_dones.append(dones)
-      self._obs = observations
 
+    rollout_dones.append(self._dones)
+    last_values = self._policy.critic(self._obs)
+    
     # Switch lists of [n_envs, n_steps] to [n_steps, n_envs]
-    rollout_observations = np.array(rollout_observations).swapaxes(0, 1)\
-        .reshape(self._batch_obs_shape)
-    rollout_actions = np.array(rollout_actions).swapaxes(0, 1)
-    rollout_values = np.array(rollout_values).swapaxes(0, 1)
-    rollout_dones = np.array(rollout_dones).swapaxes(0, 1)
-    rollout_rewards = np.array(rollout_rewards).swapaxes(0, 1)
+    rollout_observations = np.array(rollout_observations, dtype=np.uint8)\
+        .swapaxes(1, 0).reshape(self._batch_obs_shape)
+    ac_dtype = np.int32 if self._discrete else np.float
+    rollout_actions = np.array(rollout_actions, dtype=ac_dtype).swapaxes(1, 0)
+    rollout_values = np.array(rollout_values).swapaxes(1, 0)
+    rollout_dones = np.array(rollout_dones).swapaxes(1, 0)
+    rollout_rewards = np.array(rollout_rewards).swapaxes(1, 0)
 
     rollout_returns = self._compute_future_returns(
-        rollout_rewards, rollout_dones, rollout_values)
+        rollout_rewards, rollout_dones, last_values)
 
     rollout_actions = rollout_actions.flatten()
     rollout_values = rollout_values.reshape(-1, 1)
@@ -62,7 +67,7 @@ class A2CRunner(object):
     return rollout_returns, rollout_actions, \
         rollout_observations, rollout_values
 
-  def _compute_future_returns(self, rewards, dones, values):
+  def _compute_future_returns(self, rewards, dones, last_values):
     ''' Compute the future returns for a given rollout of immediate rewards.
         Used for GMDP algorithm. Each row contains the data for each
         environment.
@@ -80,22 +85,20 @@ class A2CRunner(object):
     '''
     returns = []
 
-    for _, (rollout_rewards, rollout_dones, rollout_values) in enumerate(
-        zip(rewards, dones, values)):
+    for _, (rollout_rewards, rollout_dones, last_val) in enumerate(
+        zip(rewards, dones, last_values)):
       rollout_rewards = rollout_rewards.tolist()
-      rollout_values = rollout_values.tolist()
       rollout_dones = rollout_dones.tolist()
 
       running_sum = 0
       rollout_returns = []
 
-      for i, (reward, done, val) in enumerate(zip(reversed(rollout_rewards),
-                                                  reversed(rollout_dones),
-                                                  reversed(rollout_values))):
+      for i, (reward, done) in enumerate(zip(reversed(rollout_rewards),
+                                                  reversed(rollout_dones))):
         # If the last step in the rollout is not terminal, the unbiased estimate
         # of the return is the state value.
         if i == 0 and not done:
-          running_sum = val + reward
+          running_sum = last_val + reward
         elif not done:
           running_sum = reward + self._gamma * running_sum
         else:

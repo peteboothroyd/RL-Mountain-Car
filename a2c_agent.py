@@ -1,22 +1,25 @@
 import os
 import time
+import gym
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 from baselines import logger
 from baselines.common import set_global_seeds
+from baselines.common.tf_util import make_session
 
 from a2c_policy import A2CPolicy
 from a2c_runner import A2CRunner
 
 
 class A2CAgent(object):
-  def __init__(self, env, model_dir, n_steps, debug, gamma,
-               summary_every, num_learning_steps, seed,
-               cnn, tensorboard_summaries, reg_coeff=1e-3, ent_coeff=0.01):
+  def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
+               summary_every, num_learning_steps, seed, tensorboard_summaries,
+               reg_coeff=1e-6, ent_coeff=0.1):
+    discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
-    self._sess = tf.Session()
+    self._sess = make_session()
     self._step = 0
     self._summary_every = summary_every
     self._seed = seed
@@ -34,7 +37,8 @@ class A2CAgent(object):
         sess=self._sess, obs_space=env.observation_space, cnn=cnn,
         act_space=env.action_space, reg_coeff=reg_coeff, ent_coeff=ent_coeff)
     self._runner = A2CRunner(
-        policy=self._policy, env=env, n_steps=n_steps, gamma=gamma)
+        policy=self._policy, env=env, n_steps=n_steps, gamma=gamma,
+        discrete=discrete)
 
     if self._tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
@@ -68,21 +72,23 @@ class A2CAgent(object):
         total_timesteps += returns.shape[0]
         n_seconds = time.time()-start_time
 
-        advantages = returns - values
-
-        loss = self._policy.train(
-            returns, observations, advantages, actions)
+        pg_loss, val_loss, expl_loss, reg_loss, entropy = self._policy.train(
+            observations, returns, actions, values)
 
         if summarise:
           logger.record_tabular('seconds', n_seconds)
           logger.record_tabular('step', self._step)
           logger.record_tabular('total_timesteps', total_timesteps)
-          logger.record_tabular('loss', loss)
+          logger.record_tabular('pg_loss', pg_loss)
+          logger.record_tabular('expl_loss', expl_loss)
+          logger.record_tabular('val_loss', val_loss)
+          logger.record_tabular('reg_loss', reg_loss)
+          logger.record_tabular('entropy', entropy)
           logger.dump_tabular()
 
           if self._tensorboard_summaries:
             summary = self._policy.summarize(
-                returns, observations, advantages, actions)
+                observations, returns, actions, values)
             self._summary_writer.add_summary(summary, self._step)
     except:
       # Reraise to allow early termination of learning, and display
