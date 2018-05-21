@@ -15,8 +15,8 @@ class A2CPolicy(object):
       lrt - learning rate
   '''
 
-  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=1e-4,
-               ent_coeff=0.01, initial_learning_rate=1e-3):
+  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=1e-6,
+               ent_coeff=0.01, initial_learning_rate=5e-4):
     lrt = tf.train.exponential_decay(
         learning_rate=initial_learning_rate, decay_steps=200, decay_rate=0.99,
         global_step=tf.train.get_or_create_global_step())
@@ -95,10 +95,10 @@ class A2CPolicy(object):
         critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
             / (tf.sqrt(critic_pred_var)+1e-4)
 
-        tf.summary.histogram('critic_pred_mean', critic_pred_mean)
-        tf.summary.histogram('critic_pred_var', critic_pred_var)
-        tf.summary.histogram('returns_mean', val_batch_norm.moving_mean)
-        tf.summary.histogram('returns_var', val_batch_norm.moving_variance)
+        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
+        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+        tf.summary.scalar('returns_mean', tf.squeeze(val_batch_norm.moving_mean))
+        tf.summary.scalar('returns_var', tf.squeeze(val_batch_norm.moving_variance))
         tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
@@ -131,7 +131,7 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.AdamOptimizer(lrt)
+      optimizer = tf.train.RMSPropOptimizer(learning_rate=lrt, decay=0.99)
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
@@ -297,36 +297,52 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
   return hidden
 
 
-def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
+def _build_cnn(input_placeholder, is_training, scope):
+  # The CNN architecture as described in the A3C Paper
   with tf.variable_scope(scope):
-    hidden = tf.layers.batch_normalization(
+    batch_norm_in = tf.layers.batch_normalization(
         inputs=input_placeholder, training=is_training, renorm=True)
 
-    for i in range(n_layers):
-      hidden = tf.layers.conv2d(
-          inputs=hidden,
-          filters=64,
-          kernel_size=[5, 5],  # strides=[2, 2],
-          padding="same",
-          activation=tf.nn.relu,
-          kernel_initializer=tf.glorot_normal_initializer(),
-          use_bias=True,
-          bias_initializer=tf.zeros_initializer(),
-          data_format='channels_last',
-          name='conv_{0}'.format(i),
-          kernel_regularizer=tf.nn.l2_loss)
-      tf.summary.histogram('conv_{0}'.format(i), hidden)
-      hidden = tf.layers.batch_normalization(
-          inputs=hidden, training=is_training, renorm=True)
-      tf.summary.histogram('conv_batch_norm{0}'.format(i), hidden)
-      hidden = tf.layers.max_pooling2d(
-          inputs=hidden, pool_size=[2, 2], strides=2,
-          name='conv_maxpool{0}'.format(i))
+    conv1 = tf.layers.conv2d(
+        inputs=batch_norm_in,
+        filters=16,
+        kernel_size=[8, 8],
+        strides=[4, 4],
+        padding="same",
+        activation=tf.nn.relu,
+        kernel_initializer=tf.glorot_normal_initializer(),
+        use_bias=True,
+        bias_initializer=tf.zeros_initializer(),
+        data_format='channels_last',
+        name='conv_1',
+        kernel_regularizer=tf.nn.l2_loss)
+    tf.summary.histogram('conv_1', conv1)
+    batch_norm1 = tf.layers.batch_normalization(
+        inputs=conv1, training=is_training, renorm=True)
+    tf.summary.histogram('conv_batch_norm1', batch_norm1)
+    conv2 = tf.layers.conv2d(
+        inputs=batch_norm1,
+        filters=32,
+        kernel_size=[4, 4],
+        strides=[2, 2],
+        padding="same",
+        activation=tf.nn.relu,
+        kernel_initializer=tf.glorot_normal_initializer(),
+        use_bias=True,
+        bias_initializer=tf.zeros_initializer(),
+        data_format='channels_last',
+        name='conv_2',
+        kernel_regularizer=tf.nn.l2_loss)
+    tf.summary.histogram('conv_2'.format(i), conv1)
+    batch_norm2 = tf.layers.batch_normalization(
+        inputs=conv2, training=is_training, renorm=True)
+    tf.summary.histogram('conv_batch_norm2', batch_norm2)
+      
 
-    flattened = tf.layers.flatten(hidden)
+    flattened = tf.layers.flatten(batch_norm2)
     print('flattened.shape', flattened.shape)
     dense = tf.layers.dense(
-        inputs=flattened, units=512, activation=tf.nn.relu, name="conv_fc",
+        inputs=flattened, units=256, activation=tf.nn.relu, name="conv_fc",
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
         bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
