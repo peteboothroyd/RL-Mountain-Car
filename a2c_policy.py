@@ -2,8 +2,6 @@ import tensorflow as tf
 import numpy as np
 import gym
 
-from baselines.a2c.utils import Scheduler
-
 
 class A2CPolicy(object):
   '''The policy for the A2C algorithm. Can deal with discrete and continuous
@@ -17,28 +15,29 @@ class A2CPolicy(object):
       lrt - learning rate
   '''
 
-  def __init__(self, sess, obs_space, act_space, reg_coeff, ent_coeff, cnn,
-               learning_rate=1e-4, total_timesteps=int(10e6),
-               lrschedule='linear'):
-    lr_scheduler = Scheduler(
-        v=learning_rate, nvalues=total_timesteps, schedule=lrschedule)
+  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=1e-4,
+               ent_coeff=0.01, initial_learning_rate=1e-3):
+    lrt = tf.train.exponential_decay(
+        learning_rate=initial_learning_rate, decay_steps=200, decay_rate=0.99,
+        global_step=tf.train.get_or_create_global_step())
+
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
-    obs_shape = obs_space.shape
     act_dim = act_space.n if discrete else act_space.shape[0]
     print('act_dim', act_dim)
 
     with tf.name_scope('inputs'):
-      adv, obs, is_training, act, val, lrt = _create_input_placeholders(
-          act_dim, obs_shape, discrete)
+      adv, obs, is_training, act, val = _create_input_placeholders(
+          act_dim, obs_space, discrete, cnn)
 
-      # normalised_adv = tf.layers.batch_normalization(
-      #     inputs=adv, training=is_training, renorm=True)
-      # tf.summary.histogram('normalised_adv', normalised_adv)
+      normalised_adv = tf.layers.batch_normalization(
+          inputs=adv, training=is_training, renorm=True)
 
-      # val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-      # normalised_val = val_batch_norm(val, training=is_training)
-      # tf.summary.histogram('normalised_val', normalised_val)
+      val_batch_norm = tf.layers.BatchNormalization(renorm=True)
+      normalised_val = val_batch_norm(val, training=is_training)
+
+      tf.summary.histogram('normalised_val', normalised_val)
+      tf.summary.histogram('normalised_adv', normalised_adv)
 
     with tf.name_scope('action'):
       if cnn:
@@ -46,6 +45,7 @@ class A2CPolicy(object):
       else:
         hidden = _build_mlp(
             obs, is_training, 'hidden', activation=tf.nn.tanh, size=64)
+      tf.summary.histogram('hidden_output', hidden)
 
       if discrete:
         act_logits = tf.layers.dense(
@@ -72,7 +72,7 @@ class A2CPolicy(object):
         if discrete:
           dist = tf.distributions.Categorical(
               logits=act_logits, name='categorical_dist')
-          sample_act = dist.sample()
+          sample_act = _gumbel_softmax_sample(hidden)
         else:
           dist = tf.contrib.distributions.MultivariateNormalDiag(
               loc=act_mean, scale_diag=act_std_dev,
@@ -82,52 +82,56 @@ class A2CPolicy(object):
 
         tf.summary.histogram('sample_action', sample_act)
 
-      with tf.name_scope('predict'):
+      with tf.name_scope('critic'):
         critic_pred = tf.layers.dense(
             inputs=hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
             kernel_initializer=tf.glorot_normal_initializer())
 
         # Rescale value predictions based on moments of returns
-        # critic_pred_mu, critic_pred_var = tf.nn.moments(
-        #     critic_pred, axes=[0])
-        # critic_pred = critic_pred - critic_pred_mu + \
-        #     val_batch_norm.moving_mean
-        # critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
-        #     / (tf.sqrt(critic_pred_var)+1e-4)
+        critic_pred_mean, critic_pred_var = tf.nn.moments(
+            critic_pred, axes=[0])
+        critic_pred = critic_pred - critic_pred_mean + \
+            val_batch_norm.moving_mean
+        critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
+            / (tf.sqrt(critic_pred_var)+1e-4)
 
+        tf.summary.histogram('critic_pred_mean', critic_pred_mean)
+        tf.summary.histogram('critic_pred_var', critic_pred_var)
+        tf.summary.histogram('returns_mean', val_batch_norm.moving_mean)
+        tf.summary.histogram('returns_var', val_batch_norm.moving_variance)
         tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
-      if discrete:
-        log_prob = dist.log_prob(act, name='categorical_log_prob')
-      else:
-        log_prob = dist.log_prob(act, name='multivariate_gaussian_log_prob')
+      log_prob = dist.log_prob(act, name='log_prob')
+      tf.summary.histogram('log_prob', log_prob)
+
+    with tf.name_scope('entropy'):
+      ent = tf.reduce_mean(dist.entropy())
+      tf.summary.scalar('actor_entropy', ent)
 
     with tf.name_scope('loss'):
       # Minimising negative equivalent to maximising
-      # normalised_adv
-      actor_pg_loss = tf.reduce_mean(-log_prob * adv, name='loss')
+      actor_pg_loss = tf.reduce_mean(-log_prob * normalised_adv, name='loss')
       tf.summary.scalar('actor_pg_loss', actor_pg_loss)
-      ent = tf.reduce_mean(dist.entropy())
-      tf.summary.scalar('actor_entropy', ent)
+
       actor_expl_loss = ent * ent_coeff
       tf.summary.scalar('actor_expl_loss', actor_expl_loss)
+
       actor_total_loss = actor_pg_loss - actor_expl_loss
+      tf.summary.scalar('actor_total_loss', actor_total_loss)
 
       critic_loss = tf.reduce_mean(
-          tf.square(critic_pred - val))/2  # normalised_val
+          tf.square(critic_pred - normalised_val))/2
       tf.summary.scalar('critic_loss', critic_loss)
 
       reg_loss = tf.losses.get_regularization_loss() * reg_coeff
       tf.summary.scalar('reg_loss', reg_loss)
 
-      total_loss = actor_total_loss + 0.5 * critic_loss  # + reg_loss
-
+      total_loss = actor_total_loss + 0.5 * critic_loss + reg_loss
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.RMSPropOptimizer(
-          learning_rate=lrt, decay=0.99, epsilon=1e-5)
+      optimizer = tf.train.AdamOptimizer(lrt)
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
@@ -211,16 +215,12 @@ class A2CPolicy(object):
       '''
       advantages = returns - values
 
-      for _ in range(len(observations)):
-        cur_lr = lr_scheduler.value()
-
       feed_dict = {
           obs: observations,
           val: returns,
           adv: advantages,
           act: actions,
-          is_training: True,
-          lrt: cur_lr
+          is_training: True
       }
 
       _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy = \
@@ -306,8 +306,7 @@ def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
       hidden = tf.layers.conv2d(
           inputs=hidden,
           filters=64,
-          kernel_size=[5, 5],
-          strides=[2, 2],
+          kernel_size=[5, 5],  # strides=[2, 2],
           padding="same",
           activation=tf.nn.relu,
           kernel_initializer=tf.glorot_normal_initializer(),
@@ -316,13 +315,16 @@ def _build_cnn(input_placeholder, is_training, scope, n_layers=3):
           data_format='channels_last',
           name='conv_{0}'.format(i),
           kernel_regularizer=tf.nn.l2_loss)
+      tf.summary.histogram('conv_{0}'.format(i), hidden)
       hidden = tf.layers.batch_normalization(
           inputs=hidden, training=is_training, renorm=True)
-      # hidden = tf.layers.max_pooling2d(
-      #     inputs=hidden, pool_size=[2, 2], strides=2,
-      #     name='conv_maxpool{0}'.format(i))
+      tf.summary.histogram('conv_batch_norm{0}'.format(i), hidden)
+      hidden = tf.layers.max_pooling2d(
+          inputs=hidden, pool_size=[2, 2], strides=2,
+          name='conv_maxpool{0}'.format(i))
 
     flattened = tf.layers.flatten(hidden)
+    print('flattened.shape', flattened.shape)
     dense = tf.layers.dense(
         inputs=flattened, units=512, activation=tf.nn.relu, name="conv_fc",
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
@@ -349,8 +351,7 @@ def _clip_by_global_norm(grads_and_vars, norm=0.5):
   return zip(clipped_grads, variables)
 
 
-def _create_input_placeholders(act_dim, obs_shape, discrete):
-  learning_rate = tf.placeholder(tf.float32, [])
+def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
   if discrete:
     act = tf.placeholder(dtype=tf.int32, shape=[None], name='act')
   else:
@@ -359,10 +360,31 @@ def _create_input_placeholders(act_dim, obs_shape, discrete):
 
   adv = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='adv')
+  print('obs_space.dtype', obs_space.dtype, 'obs_space.shape', obs_space.shape)
   obs = tf.placeholder(
-      dtype=tf.float32, shape=(None,)+obs_shape, name='obs')
+      dtype=obs_space.dtype, shape=(None,)+obs_space.shape, name='obs')
+  obs = tf.cast(obs, tf.float32)
   val = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='values_placeholder')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
 
-  return adv, obs, is_training, act, val, learning_rate
+  tf.summary.histogram('adv', adv)
+  tf.summary.histogram('val', val)
+  tf.summary.histogram('act', act)
+  if cnn:
+    tf.summary.image('obs', obs)
+  else:
+    tf.summary.histogram('obs', obs)
+
+  return adv, obs, is_training, act, val
+
+
+def _gumbel_softmax_sample(logits):
+  # Note this is a crucial component of the A2C algorithm. Noise must be added
+  # to the sampled actions to explore the space effectively.
+  # For explanation of Gumbel softmax reparameterisation see:
+  # https://casmls.github.io/general/2017/02/01/GumbelSoftmax.html
+  noise = tf.random_uniform(shape=tf.shape(logits))
+  actions = tf.argmax(logits - tf.log(tf.log(noise)), axis=1)
+  print('logits shape', tf.shape(logits), 'actions shape', tf.shape(actions))
+  return actions

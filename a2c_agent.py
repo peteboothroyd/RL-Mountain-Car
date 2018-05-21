@@ -15,8 +15,7 @@ from a2c_runner import A2CRunner
 
 class A2CAgent(object):
   def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
-               summary_every, num_learning_steps, seed, tensorboard_summaries,
-               reg_coeff=1e-6, ent_coeff=0.1):
+               summary_every, num_learning_steps, seed, tensorboard_summaries):
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
     self._sess = make_session()
@@ -35,7 +34,7 @@ class A2CAgent(object):
 
     self._policy = A2CPolicy(
         sess=self._sess, obs_space=env.observation_space, cnn=cnn,
-        act_space=env.action_space, reg_coeff=reg_coeff, ent_coeff=ent_coeff)
+        act_space=env.action_space)
     self._runner = A2CRunner(
         policy=self._policy, env=env, n_steps=n_steps, gamma=gamma,
         discrete=discrete)

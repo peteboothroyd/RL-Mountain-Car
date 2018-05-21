@@ -12,7 +12,7 @@ from baselines.common import set_global_seeds
 from baselines.common.atari_wrappers import make_atari, wrap_deepmind
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
 from baselines.common.vec_env.vec_frame_stack import VecFrameStack
-# from utils import plot
+
 from gym_environment import Continuous_MountainCarEnv
 
 # Environment ids
@@ -80,7 +80,7 @@ def command_line_args():
       '--gamma', type=float, default=0.99,
       help='value of gamma for Bellman equations')
   parser.add_argument(
-      '--tensorboard_summaries', action='store_true',
+      '--tensorboard_summaries', action='store_false',
       help='store diagnostics for tensorboard')
   parser.add_argument(
       '--actor_expl_loss', action='store_false',
