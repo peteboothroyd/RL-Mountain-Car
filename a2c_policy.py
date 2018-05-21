@@ -131,7 +131,7 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.RMSPropOptimizer(learning_rate=lrt, decay=0.99)
+      optimizer = tf.train.RMSPropOptimizer(learning_rate=lrt, decay=0.99, epsilon=1e-5)
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
@@ -333,11 +333,10 @@ def _build_cnn(input_placeholder, is_training, scope):
         data_format='channels_last',
         name='conv_2',
         kernel_regularizer=tf.nn.l2_loss)
-    tf.summary.histogram('conv_2'.format(i), conv1)
+    tf.summary.histogram('conv_2', conv2)
     batch_norm2 = tf.layers.batch_normalization(
         inputs=conv2, training=is_training, renorm=True)
     tf.summary.histogram('conv_batch_norm2', batch_norm2)
-      
 
     flattened = tf.layers.flatten(batch_norm2)
     print('flattened.shape', flattened.shape)
