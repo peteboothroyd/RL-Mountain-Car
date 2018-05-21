@@ -1,13 +1,13 @@
 import os
 import time
 import gym
+import multiprocessing
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 from baselines import logger
 from baselines.common import set_global_seeds
-from baselines.common.tf_util import make_session
 
 from a2c_policy import A2CPolicy
 from a2c_runner import A2CRunner
@@ -18,7 +18,12 @@ class A2CAgent(object):
                summary_every, num_learning_steps, seed, tensorboard_summaries):
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
-    self._sess = make_session()
+    num_cpu = multiprocessing.cpu_count()
+    tf_config = tf.ConfigProto(
+        inter_op_parallelism_threads=num_cpu,
+        intra_op_parallelism_threads=num_cpu)
+    self._sess = tf.Session(config=tf_config)
+
     self._step = 0
     self._summary_every = summary_every
     self._seed = seed

@@ -16,7 +16,7 @@ class A2CPolicy(object):
   '''
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=1e-6,
-               ent_coeff=0.01, initial_learning_rate=5e-4):
+               ent_coeff=0.01, initial_learning_rate=2e-5):
     lrt = tf.train.exponential_decay(
         learning_rate=initial_learning_rate, decay_steps=200, decay_rate=0.99,
         global_step=tf.train.get_or_create_global_step())
@@ -30,16 +30,16 @@ class A2CPolicy(object):
       adv, obs, is_training, act, val = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
-      # normalised_adv = tf.layers.batch_normalization(
-      #     inputs=adv, training=is_training, renorm=True)
+      normalised_adv = tf.layers.batch_normalization(
+          inputs=adv, training=is_training, renorm=True)
 
-      # val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-      # normalised_val = val_batch_norm(val, training=is_training)
+      val_batch_norm = tf.layers.BatchNormalization(renorm=True)
+      normalised_val = val_batch_norm(val, training=is_training)
 
-      # tf.summary.histogram('normalised_val', normalised_val)
-      # tf.summary.histogram('normalised_adv', normalised_adv)
-      normalised_val = val
-      normalised_adv = adv
+      tf.summary.histogram('normalised_val', normalised_val)
+      tf.summary.histogram('normalised_adv', normalised_adv)
+      # normalised_val = val
+      # normalised_adv = adv
 
     with tf.name_scope('action'):
       if cnn:
@@ -90,18 +90,20 @@ class A2CPolicy(object):
             kernel_initializer=tf.glorot_normal_initializer())
 
         # Rescale value predictions based on moments of returns
-        # critic_pred_mean, critic_pred_var = tf.nn.moments(
-        #     critic_pred, axes=[0])
-        # critic_pred = critic_pred - critic_pred_mean + \
-        #     val_batch_norm.moving_mean
-        # critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
-        #     / (tf.sqrt(critic_pred_var)+1e-4)
+        critic_pred_mean, critic_pred_var = tf.nn.moments(
+            critic_pred, axes=[0])
+        critic_pred = critic_pred - critic_pred_mean + \
+            val_batch_norm.moving_mean
+        critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
+            / (tf.sqrt(critic_pred_var)+1e-4)
 
-        # tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
-        # tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
-        # tf.summary.scalar('returns_mean', tf.squeeze(val_batch_norm.moving_mean))
-        # tf.summary.scalar('returns_var', tf.squeeze(val_batch_norm.moving_variance))
-        # tf.summary.histogram('critic_pred', critic_pred)
+        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
+        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+        tf.summary.scalar('returns_mean', tf.squeeze(
+            val_batch_norm.moving_mean))
+        tf.summary.scalar('returns_var', tf.squeeze(
+            val_batch_norm.moving_variance))
+        tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
       log_prob = dist.log_prob(act, name='log_prob')
@@ -133,7 +135,8 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.RMSPropOptimizer(learning_rate=lrt, decay=0.99, epsilon=1e-5)
+      optimizer = tf.train.RMSPropOptimizer(
+          learning_rate=lrt, decay=0.99, epsilon=1e-5)
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
@@ -341,7 +344,7 @@ def _build_cnn(input_placeholder, is_training, scope):
     tf.summary.histogram('conv_batch_norm2', batch_norm2)
 
     flattened = tf.layers.flatten(batch_norm2)
-    print('flattened.shape', flattened.shape)
+
     dense = tf.layers.dense(
         inputs=flattened, units=256, activation=tf.nn.relu, name="conv_fc",
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
@@ -377,7 +380,7 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
 
   adv = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='adv')
-  print('obs_space.dtype', obs_space.dtype, 'obs_space.shape', obs_space.shape)
+
   obs = tf.placeholder(
       dtype=obs_space.dtype, shape=(None,)+obs_space.shape, name='obs')
   obs = tf.cast(obs, tf.float32)
