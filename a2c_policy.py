@@ -74,7 +74,7 @@ class A2CPolicy(object):
         if discrete:
           dist = tf.distributions.Categorical(
               logits=act_logits, name='categorical_dist')
-          sample_act = dist.sample(hidden)
+          sample_act = dist.sample()
         else:
           dist = tf.contrib.distributions.MultivariateNormalDiag(
               loc=act_mean, scale_diag=act_std_dev,

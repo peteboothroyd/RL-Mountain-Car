@@ -117,7 +117,7 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   if wrapper_kwargs is None: wrapper_kwargs = {}
   def make_env(rank):
     def render_video(episode_id):
-      print('Monitor: current episode id: {0}'.format(episode_id))
+      # print('Monitor: current episode id: {0}'.format(episode_id))
       return episode_id % 100 == 0
     def _thunk():
       env = make_atari(env_id)
