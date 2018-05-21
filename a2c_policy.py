@@ -30,14 +30,16 @@ class A2CPolicy(object):
       adv, obs, is_training, act, val = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
-      normalised_adv = tf.layers.batch_normalization(
-          inputs=adv, training=is_training, renorm=True)
+      # normalised_adv = tf.layers.batch_normalization(
+      #     inputs=adv, training=is_training, renorm=True)
 
-      val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-      normalised_val = val_batch_norm(val, training=is_training)
+      # val_batch_norm = tf.layers.BatchNormalization(renorm=True)
+      # normalised_val = val_batch_norm(val, training=is_training)
 
-      tf.summary.histogram('normalised_val', normalised_val)
-      tf.summary.histogram('normalised_adv', normalised_adv)
+      # tf.summary.histogram('normalised_val', normalised_val)
+      # tf.summary.histogram('normalised_adv', normalised_adv)
+      normalised_val = val
+      normalised_adv = adv
 
     with tf.name_scope('action'):
       if cnn:
@@ -72,7 +74,7 @@ class A2CPolicy(object):
         if discrete:
           dist = tf.distributions.Categorical(
               logits=act_logits, name='categorical_dist')
-          sample_act = _gumbel_softmax_sample(hidden)
+          sample_act = dist.sample(hidden)
         else:
           dist = tf.contrib.distributions.MultivariateNormalDiag(
               loc=act_mean, scale_diag=act_std_dev,
@@ -88,18 +90,18 @@ class A2CPolicy(object):
             kernel_initializer=tf.glorot_normal_initializer())
 
         # Rescale value predictions based on moments of returns
-        critic_pred_mean, critic_pred_var = tf.nn.moments(
-            critic_pred, axes=[0])
-        critic_pred = critic_pred - critic_pred_mean + \
-            val_batch_norm.moving_mean
-        critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
-            / (tf.sqrt(critic_pred_var)+1e-4)
+        # critic_pred_mean, critic_pred_var = tf.nn.moments(
+        #     critic_pred, axes=[0])
+        # critic_pred = critic_pred - critic_pred_mean + \
+        #     val_batch_norm.moving_mean
+        # critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
+        #     / (tf.sqrt(critic_pred_var)+1e-4)
 
-        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
-        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
-        tf.summary.scalar('returns_mean', tf.squeeze(val_batch_norm.moving_mean))
-        tf.summary.scalar('returns_var', tf.squeeze(val_batch_norm.moving_variance))
-        tf.summary.histogram('critic_pred', critic_pred)
+        # tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
+        # tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+        # tf.summary.scalar('returns_mean', tf.squeeze(val_batch_norm.moving_mean))
+        # tf.summary.scalar('returns_var', tf.squeeze(val_batch_norm.moving_variance))
+        # tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
       log_prob = dist.log_prob(act, name='log_prob')
@@ -392,14 +394,3 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
     tf.summary.histogram('obs', obs)
 
   return adv, obs, is_training, act, val
-
-
-def _gumbel_softmax_sample(logits):
-  # Note this is a crucial component of the A2C algorithm. Noise must be added
-  # to the sampled actions to explore the space effectively.
-  # For explanation of Gumbel softmax reparameterisation see:
-  # https://casmls.github.io/general/2017/02/01/GumbelSoftmax.html
-  noise = tf.random_uniform(shape=tf.shape(logits))
-  actions = tf.argmax(logits - tf.log(tf.log(noise)), axis=1)
-  print('logits shape', tf.shape(logits), 'actions shape', tf.shape(actions))
-  return actions
