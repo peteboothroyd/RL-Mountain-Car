@@ -16,12 +16,15 @@ class A2CPolicy(object):
       ret - returns
   '''
 
+  ENT_THRESHOL = 0.4
+
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.5, initial_learning_rate=5e-4,
+               initial_ent_coeff=0.5, initial_learning_rate=2e-4,
                batch_norm=False, decay_ent=True):
     #TODO: Remove hardcoded decay_steps from decays
     lrt = tf.train.polynomial_decay(
-        learning_rate=initial_learning_rate, decay_steps=int(50000), end_learning_rate=1e-6,
+        learning_rate=initial_learning_rate, end_learning_rate=1e-5,
+        decay_steps=int(100000),
         global_step=tf.train.get_or_create_global_step())
     tf.summary.scalar('lrt', lrt)
 
@@ -29,7 +32,7 @@ class A2CPolicy(object):
       ent_coeff = tf.train.polynomial_decay(
           learning_rate=initial_ent_coeff, decay_steps=1000,
           global_step=tf.train.get_or_create_global_step(),
-          end_learning_rate=0.01)
+          end_learning_rate=0.025)
     else:
       ent_coeff = initial_ent_coeff
     tf.summary.scalar('ent_coeff', ent_coeff)
@@ -136,6 +139,11 @@ class A2CPolicy(object):
 
       actor_expl_loss = ent * ent_coeff
       tf.summary.scalar('actor_expl_loss', actor_expl_loss)
+      # # Trouble seems to occur when the entropy of the distribution drops too low
+      # # add a large loss if the entropy drops too low
+      # ent_too_low_loss = tf.nn.relu(self.ENT_THRESHOL - ent) * 10.0
+      # tf.summary.scalar('actor_entropy', ent)
+      # actor_expl_loss += ent_too_low_loss
 
       actor_total_loss = actor_pg_loss - actor_expl_loss
       tf.summary.scalar('actor_total_loss', actor_total_loss)
@@ -151,8 +159,8 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.RMSPropOptimizer(
-          learning_rate=lrt, decay=0.99, epsilon=1e-5)
+      optimizer = tf.train.AdamOptimizer(
+          learning_rate=lrt, beta2=0.99, epsilon=1e-5) #decay=0.99, epsilon=1e-5
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)

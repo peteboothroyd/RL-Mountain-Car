@@ -36,6 +36,7 @@ class A2CAgent(object):
     self._tensorboard_summaries = tensorboard_summaries
     self._num_learning_steps = num_learning_steps
     self._env = env
+    self._batch_size = n_steps*env.num_envs
 
     self._policy = A2CPolicy(
         sess=self._sess, obs_space=env.observation_space, cnn=cnn,
@@ -52,11 +53,11 @@ class A2CAgent(object):
     if not self._graph_initialized():
       raise Exception('Graph not initialised!')
 
-  def act(self, observation):
-    ''' Given an observation of the state return an action
-        according to the current policy parameterisation.
-    '''
-    return self._policy.actor(observation[np.newaxis, :])
+  # def act(self, observation):
+  #   ''' Given an observation of the state return an action
+  #       according to the current policy parameterisation.
+  #   '''
+  #   return self._policy.actor(observation[np.newaxis, :])
 
   def learn(self):
     ''' Learn an optimal policy parameterisation by
@@ -67,7 +68,7 @@ class A2CAgent(object):
     start_time = time.time()
 
     try:
-      for self._step in range(self._num_learning_steps):
+      for self._step in range(self._num_learning_steps//self._batch_size):
         summarise = self._step % self._summary_every == 0
 
         returns, actions, observations, values = \
