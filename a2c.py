@@ -17,7 +17,7 @@ from gym_environment import Continuous_MountainCarEnv
 
 # Environment ids
 MOUNTAIN_CAR_ID = 'mountain_car'
-BREAKOUT_ID = 'BreakoutNoFrameskip-v4'
+BREAKOUT_ID = 'BreakoutNoFrameskip-v4' #: ACTION_MEANINGS=['noop', 'fire', 'left', 'right'] 
 
 
 def main():

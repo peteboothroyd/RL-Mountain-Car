@@ -15,11 +15,19 @@ class A2CPolicy(object):
       lrt - learning rate
   '''
 
-  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=1e-6,
-               ent_coeff=0.01, initial_learning_rate=2e-5):
+  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
+               initial_ent_coeff=0.1, initial_learning_rate=7e-4,
+               batch_norm=False, decay_ent=True):
     lrt = tf.train.exponential_decay(
         learning_rate=initial_learning_rate, decay_steps=200, decay_rate=0.99,
         global_step=tf.train.get_or_create_global_step())
+
+    if decay_ent:
+      ent_coeff = tf.train.exponential_decay(
+          learning_rate=initial_ent_coeff, decay_steps=200, decay_rate=0.99,
+          global_step=tf.train.get_or_create_global_step())
+    else:
+      ent_coeff = initial_ent_coeff
 
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
@@ -30,20 +38,22 @@ class A2CPolicy(object):
       adv, obs, is_training, act, val = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
-      normalised_adv = tf.layers.batch_normalization(
-          inputs=adv, training=is_training, renorm=True)
+      if batch_norm:
+        normalised_adv = tf.layers.batch_normalization(
+            inputs=adv, training=is_training, renorm=True)
 
-      val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-      normalised_val = val_batch_norm(val, training=is_training)
+        val_batch_norm = tf.layers.BatchNormalization(renorm=True)
+        normalised_val = val_batch_norm(val, training=is_training)
 
-      tf.summary.histogram('normalised_val', normalised_val)
-      tf.summary.histogram('normalised_adv', normalised_adv)
-      # normalised_val = val
-      # normalised_adv = adv
+        tf.summary.histogram('normalised_val', normalised_val)
+        tf.summary.histogram('normalised_adv', normalised_adv)
+      else:
+        normalised_val = val
+        normalised_adv = adv
 
     with tf.name_scope('action'):
       if cnn:
-        hidden = _build_cnn(obs, is_training, 'hidden')
+        hidden = _build_cnn(obs, is_training, 'hidden', batch_norm)
       else:
         hidden = _build_mlp(
             obs, is_training, 'hidden', activation=tf.nn.tanh, size=64)
@@ -90,19 +100,20 @@ class A2CPolicy(object):
             kernel_initializer=tf.glorot_normal_initializer())
 
         # Rescale value predictions based on moments of returns
-        critic_pred_mean, critic_pred_var = tf.nn.moments(
-            critic_pred, axes=[0])
-        critic_pred = critic_pred - critic_pred_mean + \
-            val_batch_norm.moving_mean
-        critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
-            / (tf.sqrt(critic_pred_var)+1e-4)
+        if batch_norm:
+          critic_pred_mean, critic_pred_var = tf.nn.moments(
+              critic_pred, axes=[0])
+          critic_pred = critic_pred - critic_pred_mean + \
+              val_batch_norm.moving_mean
+          critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
+              / (tf.sqrt(critic_pred_var)+1e-4)
 
-        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
-        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
-        tf.summary.scalar('returns_mean', tf.squeeze(
-            val_batch_norm.moving_mean))
-        tf.summary.scalar('returns_var', tf.squeeze(
-            val_batch_norm.moving_variance))
+          tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
+          tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+          tf.summary.scalar('returns_mean', tf.squeeze(
+              val_batch_norm.moving_mean))
+          tf.summary.scalar('returns_var', tf.squeeze(
+              val_batch_norm.moving_variance))
         tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
@@ -302,11 +313,14 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
   return hidden
 
 
-def _build_cnn(input_placeholder, is_training, scope):
+def _build_cnn(input_placeholder, is_training, scope, batch_norm):
   # The CNN architecture as described in the A3C Paper
   with tf.variable_scope(scope):
-    batch_norm_in = tf.layers.batch_normalization(
-        inputs=input_placeholder, training=is_training, renorm=True)
+    if batch_norm:
+      batch_norm_in = tf.layers.batch_normalization(
+          inputs=input_placeholder, training=is_training, renorm=True)
+    else:
+      batch_norm_in = input_placeholder
 
     conv1 = tf.layers.conv2d(
         inputs=batch_norm_in,
@@ -322,9 +336,14 @@ def _build_cnn(input_placeholder, is_training, scope):
         name='conv_1',
         kernel_regularizer=tf.nn.l2_loss)
     tf.summary.histogram('conv_1', conv1)
-    batch_norm1 = tf.layers.batch_normalization(
-        inputs=conv1, training=is_training, renorm=True)
-    tf.summary.histogram('conv_batch_norm1', batch_norm1)
+
+    if batch_norm:
+      batch_norm1 = tf.layers.batch_normalization(
+          inputs=conv1, training=is_training, renorm=True)
+      tf.summary.histogram('conv_batch_norm1', batch_norm1)
+    else:
+      batch_norm1 = conv1
+
     conv2 = tf.layers.conv2d(
         inputs=batch_norm1,
         filters=32,
@@ -339,9 +358,13 @@ def _build_cnn(input_placeholder, is_training, scope):
         name='conv_2',
         kernel_regularizer=tf.nn.l2_loss)
     tf.summary.histogram('conv_2', conv2)
-    batch_norm2 = tf.layers.batch_normalization(
-        inputs=conv2, training=is_training, renorm=True)
-    tf.summary.histogram('conv_batch_norm2', batch_norm2)
+
+    if batch_norm:
+      batch_norm2 = tf.layers.batch_normalization(
+          inputs=conv2, training=is_training, renorm=True)
+      tf.summary.histogram('conv_batch_norm2', batch_norm2)
+    else:
+      batch_norm2 = conv2
 
     flattened = tf.layers.flatten(batch_norm2)
 
@@ -350,8 +373,12 @@ def _build_cnn(input_placeholder, is_training, scope):
         kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
         bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
-    out = tf.layers.batch_normalization(
-        inputs=dense, training=is_training, renorm=True)
+
+    if batch_norm:
+      out = tf.layers.batch_normalization(
+          inputs=dense, training=is_training, renorm=True)
+    else:
+      out = dense
 
     return out
 
@@ -383,7 +410,7 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
 
   obs = tf.placeholder(
       dtype=obs_space.dtype, shape=(None,)+obs_space.shape, name='obs')
-  obs = tf.cast(obs, tf.float32)
+  obs = tf.cast(obs, tf.float32) / 255.0
   val = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='values_placeholder')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
