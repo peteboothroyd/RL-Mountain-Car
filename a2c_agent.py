@@ -76,7 +76,7 @@ class A2CAgent(object):
         total_timesteps += returns.shape[0]
         n_seconds = time.time()-start_time
 
-        pg_loss, val_loss, expl_loss, reg_loss, entropy = self._policy.train(
+        pg_loss, val_loss, expl_loss, reg_loss, entropy, summary = self._policy.train(
             observations, returns, actions, values)
 
         if summarise:
@@ -91,8 +91,6 @@ class A2CAgent(object):
           logger.dump_tabular()
 
           if self._tensorboard_summaries:
-            summary = self._policy.summarize(
-                observations, returns, actions, values)
             self._summary_writer.add_summary(summary, self._step)
     except:
       # Reraise to allow early termination of learning, and display

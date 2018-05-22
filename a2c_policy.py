@@ -13,21 +13,26 @@ class A2CPolicy(object):
       adv - advantages
       val - values
       lrt - learning rate
+      ret - returns
   '''
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.1, initial_learning_rate=7e-4,
+               initial_ent_coeff=0.5, initial_learning_rate=7e-4,
                batch_norm=False, decay_ent=True):
-    lrt = tf.train.exponential_decay(
-        learning_rate=initial_learning_rate, decay_steps=200, decay_rate=0.99,
+    #TODO: Remove hardcoded decay_steps from decays
+    lrt = tf.train.polynomial_decay(
+        learning_rate=initial_learning_rate, decay_steps=int(5e6), end_learning_rate=1e-4,
         global_step=tf.train.get_or_create_global_step())
+    tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
-      ent_coeff = tf.train.exponential_decay(
-          learning_rate=initial_ent_coeff, decay_steps=200, decay_rate=0.99,
-          global_step=tf.train.get_or_create_global_step())
+      ent_coeff = tf.train.polynomial_decay(
+          learning_rate=initial_ent_coeff, decay_steps=1000,
+          global_step=tf.train.get_or_create_global_step(),
+          end_learning_rate=0.01)
     else:
       ent_coeff = initial_ent_coeff
+    tf.summary.scalar('ent_coeff', ent_coeff)
 
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
@@ -35,20 +40,20 @@ class A2CPolicy(object):
     print('act_dim', act_dim)
 
     with tf.name_scope('inputs'):
-      adv, obs, is_training, act, val = _create_input_placeholders(
+      adv, obs, is_training, act, ret = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
       if batch_norm:
         normalised_adv = tf.layers.batch_normalization(
             inputs=adv, training=is_training, renorm=True)
 
-        val_batch_norm = tf.layers.BatchNormalization(renorm=True)
-        normalised_val = val_batch_norm(val, training=is_training)
+        ret_batch_norm = tf.layers.BatchNormalization(renorm=True)
+        normalised_ret = ret_batch_norm(ret, training=is_training)
 
-        tf.summary.histogram('normalised_val', normalised_val)
+        tf.summary.histogram('normalised_ret', normalised_ret)
         tf.summary.histogram('normalised_adv', normalised_adv)
       else:
-        normalised_val = val
+        normalised_ret = ret
         normalised_adv = adv
 
     with tf.name_scope('action'):
@@ -94,27 +99,27 @@ class A2CPolicy(object):
 
         tf.summary.histogram('sample_action', sample_act)
 
-      with tf.name_scope('critic'):
-        critic_pred = tf.layers.dense(
-            inputs=hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
-            kernel_initializer=tf.glorot_normal_initializer())
+    with tf.name_scope('critic'):
+      critic_pred = tf.layers.dense(
+          inputs=hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
+          kernel_initializer=tf.glorot_normal_initializer())
 
-        # Rescale value predictions based on moments of returns
-        if batch_norm:
-          critic_pred_mean, critic_pred_var = tf.nn.moments(
-              critic_pred, axes=[0])
-          critic_pred = critic_pred - critic_pred_mean + \
-              val_batch_norm.moving_mean
-          critic_pred = tf.sqrt(val_batch_norm.moving_variance) * critic_pred \
-              / (tf.sqrt(critic_pred_var)+1e-4)
+      # Rescale value predictions based on moments of returns
+      if batch_norm:
+        critic_pred_mean, critic_pred_var = tf.nn.moments(
+            critic_pred, axes=[0])
+        critic_pred = critic_pred - critic_pred_mean + \
+            ret_batch_norm.moving_mean
+        critic_pred = tf.sqrt(ret_batch_norm.moving_variance) * critic_pred \
+            / (tf.sqrt(critic_pred_var)+1e-4)
 
-          tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
-          tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
-          tf.summary.scalar('returns_mean', tf.squeeze(
-              val_batch_norm.moving_mean))
-          tf.summary.scalar('returns_var', tf.squeeze(
-              val_batch_norm.moving_variance))
-        tf.summary.histogram('critic_pred', critic_pred)
+        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
+        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+        tf.summary.scalar('returns_mean', tf.squeeze(
+            ret_batch_norm.moving_mean))
+        tf.summary.scalar('returns_var', tf.squeeze(
+            ret_batch_norm.moving_variance))
+      tf.summary.histogram('critic_pred', critic_pred)
 
     with tf.name_scope('log_prob'):
       log_prob = dist.log_prob(act, name='log_prob')
@@ -136,7 +141,7 @@ class A2CPolicy(object):
       tf.summary.scalar('actor_total_loss', actor_total_loss)
 
       critic_loss = tf.reduce_mean(
-          tf.square(critic_pred - normalised_val))/2
+          tf.square(critic_pred - normalised_ret))/2
       tf.summary.scalar('critic_loss', critic_loss)
 
       reg_loss = tf.losses.get_regularization_loss() * reg_coeff
@@ -146,8 +151,7 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.RMSPropOptimizer(
-          learning_rate=lrt, decay=0.99, epsilon=1e-5)
+      optimizer = tf.train.AdamOptimizer(learning_rate=lrt) #, decay=0.99, epsilon=1e-5
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
@@ -233,41 +237,19 @@ class A2CPolicy(object):
 
       feed_dict = {
           obs: observations,
-          val: returns,
+          ret: returns,
           adv: advantages,
           act: actions,
           is_training: True
       }
 
-      _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy = \
+      _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy,summary = \
           sess.run([train_op, actor_pg_loss, critic_loss,
-                    actor_expl_loss, reg_loss, ent],
+                    actor_expl_loss, reg_loss, ent, summaries],
                    feed_dict=feed_dict)
 
-      return pg_loss, val_loss, exploration_loss, regularization_loss, entropy
+      return pg_loss, val_loss, exploration_loss, regularization_loss, entropy, summary
 
-    def summarize(observations, returns, actions, values):
-      ''' Summarize key stats for TensorBoard.
-
-      # Params:
-        advantages:     List of advantages from a rollout
-        actions:        List of executed actions from a rollout
-        observations:   List of observed states from a rollout
-        value_targets:  List of returns from a rollout
-      '''
-      advantages = returns - values
-
-      feed_dict = {
-          obs: observations,
-          val: values,
-          adv: advantages,
-          act: actions,
-          is_training: False
-      }
-
-      _, summary = sess.run([train_op, summaries], feed_dict=feed_dict)
-
-      return summary
 
     def reset():
       ''' Reset the policy. '''
@@ -275,7 +257,6 @@ class A2CPolicy(object):
 
     self.reset = reset
     self.actor = actor
-    self.summarize = summarize
     self.critic = critic
     self.train = train
     self.step = step
@@ -411,16 +392,16 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
   obs = tf.placeholder(
       dtype=obs_space.dtype, shape=(None,)+obs_space.shape, name='obs')
   obs = tf.cast(obs, tf.float32) / 255.0
-  val = tf.placeholder(
-      dtype=tf.float32, shape=[None, 1], name='values_placeholder')
+  ret = tf.placeholder(
+      dtype=tf.float32, shape=[None, 1], name='returns')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
 
   tf.summary.histogram('adv', adv)
-  tf.summary.histogram('val', val)
+  tf.summary.histogram('ret', ret)
   tf.summary.histogram('act', act)
   if cnn:
     tf.summary.image('obs', obs)
   else:
     tf.summary.histogram('obs', obs)
 
-  return adv, obs, is_training, act, val
+  return adv, obs, is_training, act, ret
