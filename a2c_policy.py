@@ -17,11 +17,11 @@ class A2CPolicy(object):
   '''
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.5, initial_learning_rate=7e-4,
+               initial_ent_coeff=0.5, initial_learning_rate=5e-4,
                batch_norm=False, decay_ent=True):
     #TODO: Remove hardcoded decay_steps from decays
     lrt = tf.train.polynomial_decay(
-        learning_rate=initial_learning_rate, decay_steps=int(5e6), end_learning_rate=1e-4,
+        learning_rate=initial_learning_rate, decay_steps=int(50000), end_learning_rate=1e-6,
         global_step=tf.train.get_or_create_global_step())
     tf.summary.scalar('lrt', lrt)
 
@@ -151,7 +151,8 @@ class A2CPolicy(object):
       tf.summary.scalar('total_loss', total_loss)
 
     with tf.name_scope('train_network'):
-      optimizer = tf.train.AdamOptimizer(learning_rate=lrt) #, decay=0.99, epsilon=1e-5
+      optimizer = tf.train.RMSPropOptimizer(
+          learning_rate=lrt, decay=0.99, epsilon=1e-5)
       grads_and_vars = optimizer.compute_gradients(total_loss)
       grads_and_vars = _clip_by_global_norm(grads_and_vars)
       train_op = _train_with_batch_norm_update(optimizer, grads_and_vars)
