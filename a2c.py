@@ -115,20 +115,30 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   video and statistics.
   """
   if wrapper_kwargs is None: wrapper_kwargs = {}
-  def make_env(rank):
+  def make_env(rank, monitor):
     def render_video(episode_id):
       # print('Monitor: current episode id: {0}'.format(episode_id))
       return episode_id % 100 == 0
     def _thunk():
       env = make_atari(env_id)
       env.seed(seed + rank)
-      env = Monitor(
-          env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
-          video_callable=render_video)
+      if monitor:
+        env = Monitor(
+            env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
+            video_callable=render_video)
       return wrap_deepmind(env, **wrapper_kwargs)
     return _thunk
   set_global_seeds(seed)
-  return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)])
+
+  # Only monitor one of the environments
+  env_list = []
+  for i in range(num_env):
+    if i == 0:
+      env_list.append(make_env(i+start_index, True))
+    else:
+      env_list.append(make_env(i+start_index, False))
+
+  return SubprocVecEnv(env_list)
 
 if __name__ == '__main__':
   main()
