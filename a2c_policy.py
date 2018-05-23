@@ -19,21 +19,20 @@ class A2CPolicy(object):
   ENT_THRESHOL = 0.4
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.5, initial_learning_rate=7e-4,
+               initial_ent_coeff=0.05, initial_learning_rate=7e-4,
                batch_norm=False, decay_ent=True, adam=False):
-    lr_scheduler = Scheduler(v=initial_learning_rate, n_values=10e6)
     #TODO: Remove hardcoded decay_steps from decays
-    # lrt = tf.train.polynomial_decay(
-    #     learning_rate=initial_learning_rate, end_learning_rate=1e-6,
-    #     decay_steps=int(100000),
-    #     global_step=tf.train.get_or_create_global_step())
-    # tf.summary.scalar('lrt', lrt)
+    lrt = tf.train.polynomial_decay(
+        learning_rate=initial_learning_rate, end_learning_rate=1e-5,
+        decay_steps=int(1e5),
+        global_step=tf.train.get_or_create_global_step())
+    tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
       ent_coeff = tf.train.polynomial_decay(
-          learning_rate=initial_ent_coeff, decay_steps=1000,
+          learning_rate=initial_ent_coeff, decay_steps=int(3e4),
           global_step=tf.train.get_or_create_global_step(),
-          end_learning_rate=0.01)
+          end_learning_rate=0.001)
     else:
       ent_coeff = initial_ent_coeff
     tf.summary.scalar('ent_coeff', ent_coeff)
@@ -44,7 +43,7 @@ class A2CPolicy(object):
     print('act_dim', act_dim)
 
     with tf.name_scope('inputs'):
-      adv, obs, is_training, act, ret, lrt = _create_input_placeholders(
+      adv, obs, is_training, act, ret = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
       if batch_norm:
@@ -249,16 +248,12 @@ class A2CPolicy(object):
       '''
       advantages = returns - values
 
-      for _ in range(len(returns)):
-        cur_lr = lr_scheduler.value()
-
       feed_dict = {
           obs: observations,
           ret: returns,
           adv: advantages,
           act: actions,
-          is_training: True,
-          lrt: cur_lr
+          is_training: True
       }
 
       _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy, summary = \
@@ -413,9 +408,7 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
   ret = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='returns')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
-  lrt = tf.placeholder(tf.float32, shape=[], name='learning_rate')
 
-  tf.summary.histogram('lrt', lrt)
   tf.summary.histogram('adv', adv)
   tf.summary.histogram('ret', ret)
   tf.summary.histogram('act', act)
@@ -424,16 +417,4 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
   else:
     tf.summary.histogram('obs', obs)
 
-  return adv, obs, is_training, act, ret, lrt
-
-
-class Scheduler(object):
-  def __init__(self, v, n_values):
-    self.n = 0.0
-    self.v = v
-    self.n_values = n_values
-
-  def value(self):
-    current_value = self.v*(1-(self.n/self.n_values))
-    self.n += 1.0
-    return current_value
+  return adv, obs, is_training, act, ret
