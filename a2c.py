@@ -32,11 +32,9 @@ def main():
     # Use a CNN for the ATARI games
     cnn = True
   elif args.env_id == MOUNTAIN_CAR_ID:
-    if args.continuing_env:
-      env = Continuous_MountainCarEnv(gaussian_reward_scale=0.1, t_step=0.1)
-    else:
-      env = Continuous_MountainCarEnv(terminating=True, t_step=0.1)
-    env = Monitor(env, args.model_dir)
+    def env_factory():
+      return Continuous_MountainCarEnv(terminating=True, t_step=0.3)
+    env = make_env(env_factory, args.num_env, args.seed)
 
   agent = A2CAgent(
       env,
@@ -106,7 +104,7 @@ def command_line_args():
       '--seed', help='The random number generator seed', default=1, type=int)
   return parser.parse_args()
 
-def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
+def make_env(env_factory, num_env, seed, wrapper_kwargs=None, start_index=0):
   """
   Create a wrapped, monitored SubprocVecEnv for Atari. Note this is altered from
   the OpenAI baselines repo:
@@ -115,12 +113,12 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   video and statistics.
   """
   if wrapper_kwargs is None: wrapper_kwargs = {}
-  def make_env(rank, monitor):
+  def make_envs(rank, monitor):
     def render_video(episode_id):
-      # print('Monitor: current episode id: {0}'.format(episode_id))
+      print('Monitor: current episode id: {0}'.format(episode_id))
       return episode_id % 100 == 0
     def _thunk():
-      env = make_atari(env_id)
+      env = env_factory()
       env.seed(seed + rank)
       if monitor:
         env = Monitor(
@@ -134,11 +132,16 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   env_list = []
   for i in range(num_env):
     if i == 0:
-      env_list.append(make_env(i+start_index, True))
+      env_list.append(make_envs(i+start_index, True))
     else:
-      env_list.append(make_env(i+start_index, False))
+      env_list.append(make_envs(i+start_index, False))
 
   return SubprocVecEnv(env_list)
+
+def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
+  def env_factory():
+    return make_atari(env_id)
+  return make_env(env_factory, num_env, seed, wrapper_kwargs, start_index)
 
 if __name__ == '__main__':
   main()

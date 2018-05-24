@@ -19,8 +19,8 @@ class A2CPolicy(object):
   ENT_THRESHOL = 0.4
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.05, initial_learning_rate=7e-4,
-               batch_norm=False, decay_ent=True, adam=False):
+               initial_ent_coeff=0.01, initial_learning_rate=7e-4,
+               batch_norm=False, decay_ent=False, adam=False):
     #TODO: Remove hardcoded decay_steps from decays
     lrt = tf.train.polynomial_decay(
         learning_rate=initial_learning_rate, end_learning_rate=1e-4,
@@ -29,13 +29,13 @@ class A2CPolicy(object):
     tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
-      # ent_coeff = tf.train.polynomial_decay(
-      #     learning_rate=initial_ent_coeff, decay_steps=int(3e4),
-      #     global_step=tf.train.get_or_create_global_step(),
-      #     end_learning_rate=0.001)
-      ent_coeff = tf.train.exponential_decay(
-          learning_rate=initial_learning_rate, decay_steps=150, decay_rate=0.99,
-          global_step=tf.train.get_or_create_global_step())
+      ent_coeff = tf.train.polynomial_decay(
+          learning_rate=initial_ent_coeff, decay_steps=int(30000),
+          global_step=tf.train.get_or_create_global_step(),
+          end_learning_rate=0.005)
+      # ent_coeff = tf.train.exponential_decay(
+      #     learning_rate=initial_ent_coeff, decay_steps=150, decay_rate=0.99,
+      #     global_step=tf.train.get_or_create_global_step())
     else:
       ent_coeff = initial_ent_coeff
     tf.summary.scalar('ent_coeff', ent_coeff)

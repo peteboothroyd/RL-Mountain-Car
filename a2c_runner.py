@@ -37,22 +37,26 @@ class A2CRunner(object):
     rollout_dones, rollout_values = [], []
 
     for _ in range(self._n_steps):
+      # NOTE: In each iteration we are saving:
+      # $x_t, v(x_t), a_t, r_{t+1}, done(x_{t+1})$
+      rollout_observations.append(np.copy(self._obs))
       actions, values = self._policy.step(self._obs)
-      rollout_dones.append(self._dones)
+      rollout_values.append(np.squeeze(values))
+      rollout_actions.append(actions)
       self._obs, rewards, self._dones, _ = self._env.step(actions)
       rollout_rewards.append(rewards)
-      rollout_values.append(np.squeeze(values))
-      rollout_observations.append(np.copy(self._obs))
-      rollout_actions.append(actions)
+      rollout_dones.append(self._dones)
 
-    rollout_dones.append(self._dones)
     last_values = self._policy.critic(self._obs)
-    
-    # Switch lists of [n_envs, n_steps] to [n_steps, n_envs]
-    rollout_observations = np.array(rollout_observations, dtype=np.uint8)\
+
+    obs_dtype = self._env.observation_space.dtype
+    act_dtype = self._env.action_space.dtype
+
+    # Switch lists of [n_steps, n_envs] to [n_envs, n_steps]
+    rollout_observations = np.array(rollout_observations, dtype=obs_dtype)\
         .swapaxes(1, 0).reshape(self._batch_obs_shape)
-    ac_dtype = np.int32 if self._discrete else np.float
-    rollout_actions = np.array(rollout_actions, dtype=ac_dtype).swapaxes(1, 0)
+    rollout_actions = np.array(rollout_actions, dtype=act_dtype)
+    rollout_actions = np.array(rollout_actions, dtype=act_dtype).swapaxes(1, 0)
     rollout_values = np.array(rollout_values).swapaxes(1, 0)
     rollout_dones = np.array(rollout_dones).swapaxes(1, 0)
     rollout_rewards = np.array(rollout_rewards).swapaxes(1, 0)
@@ -93,16 +97,18 @@ class A2CRunner(object):
       running_sum = 0
       rollout_returns = []
 
-      for i, (reward, done) in enumerate(zip(reversed(rollout_rewards),
-                                                  reversed(rollout_dones))):
-        # If the last step in the rollout is not terminal, the unbiased estimate
-        # of the return is the state value.
-        if i == 0 and not done:
-          running_sum = last_val + reward
-        elif not done:
-          running_sum = reward + self._gamma * running_sum
-        else:
+      for i, (reward, done) in enumerate(
+          zip(reversed(rollout_rewards), reversed(rollout_dones))):
+        if done:
           running_sum = reward
+        else:
+          if i == 0:
+            # If the last step in the rollout is not terminal, the unbiased
+            # estimate of the return is the reward + discounted value of the
+            # next state
+            running_sum = reward + self._gamma * last_val
+          else:
+            running_sum = reward + self._gamma * running_sum
 
         rollout_returns.append(running_sum)
 
