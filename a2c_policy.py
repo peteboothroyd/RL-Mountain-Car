@@ -18,17 +18,17 @@ class A2CPolicy(object):
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
                initial_ent_coeff=0.01, initial_learning_rate=7e-4,
-               batch_norm=False, decay_ent=True, adam=False):
+               batch_norm=True, decay_ent=True, adam=True):
     #TODO: Remove hardcoded decay_steps from decays
     lrt = tf.train.polynomial_decay(
         learning_rate=initial_learning_rate, end_learning_rate=0,
-        decay_steps=int(6e4),
+        decay_steps=int(1e5),
         global_step=tf.train.get_or_create_global_step())
     tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
       ent_coeff = tf.train.polynomial_decay(
-          learning_rate=initial_ent_coeff, decay_steps=int(6e4),
+          learning_rate=initial_ent_coeff, decay_steps=int(1e5),
           global_step=tf.train.get_or_create_global_step(),
           end_learning_rate=0.001)
     else:
@@ -68,15 +68,15 @@ class A2CPolicy(object):
       if discrete:
         act_logits = tf.layers.dense(
             inputs=hidden, units=act_dim, activation=tf.nn.relu,
-            use_bias=True, bias_initializer=tf.ones_initializer(),
-            kernel_initializer=tf.orthogonal_initializer(),
+            use_bias=True, bias_initializer=tf.zeros_initializer(),
+            kernel_initializer=tf.glorot_normal_initializer(),
             kernel_regularizer=tf.nn.l2_loss)
         tf.summary.histogram('act_logits', act_logits)
       else:
         act_mean = tf.layers.dense(
             inputs=hidden, units=act_dim, activation=None,
-            kernel_initializer=tf.orthogonal_initializer(),
-            bias_initializer=tf.ones_initializer(), name='mean')
+            kernel_initializer=tf.glorot_normal_initializer(),
+            bias_initializer=tf.zeros_initializer(), name='mean')
         tf.summary.histogram('mean', act_mean)
 
         # Standard deviation of the normal distribution over actions
@@ -103,7 +103,7 @@ class A2CPolicy(object):
     with tf.name_scope('critic'):
       critic_prediction = tf.layers.dense(
           inputs=hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
-          kernel_initializer=tf.orthogonal_initializer())
+          kernel_initializer=tf.glorot_normal_initializer())
 
       # Rescale value predictions based on moments of returns
       if batch_norm:
@@ -155,8 +155,7 @@ class A2CPolicy(object):
 
     with tf.name_scope('train_network'):
       if adam:
-        optimizer = tf.train.AdamOptimizer(
-            learning_rate=lrt, epsilon=1e-3, beta2=0.99)
+        optimizer = tf.train.AdamOptimizer(learning_rate=lrt, epsilon=1e-5)
       else:
         optimizer = tf.train.RMSPropOptimizer(
             learning_rate=lrt, decay=0.99, epsilon=1e-5)
@@ -292,8 +291,8 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
       hidden = tf.layers.dense(
           inputs=hidden, units=size, activation=activation,
           name="dense_{}".format(i), use_bias=True,
-          bias_initializer=tf.ones_initializer(),
-          kernel_initializer=tf.orthogonal_initializer(),
+          bias_initializer=tf.zeros_initializer(),
+          kernel_initializer=tf.glorot_normal_initializer(),
           kernel_regularizer=tf.nn.l2_loss)
 
       tf.summary.histogram('dense{0}_activation'.format(i), hidden)
@@ -321,9 +320,9 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
         strides=[4, 4],
         padding="same",
         activation=tf.nn.relu,
-        kernel_initializer=tf.orthogonal_initializer(),
+        kernel_initializer=tf.glorot_normal_initializer(),
         use_bias=True,
-        bias_initializer=tf.ones_initializer(),
+        bias_initializer=tf.zeros_initializer(),
         data_format='channels_last',
         name='conv_1',
         kernel_regularizer=tf.nn.l2_loss)
@@ -343,9 +342,9 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
         strides=[2, 2],
         padding="same",
         activation=tf.nn.relu,
-        kernel_initializer=tf.orthogonal_initializer(),
+        kernel_initializer=tf.glorot_normal_initializer(),
         use_bias=True,
-        bias_initializer=tf.ones_initializer(),
+        bias_initializer=tf.zeros_initializer(),
         data_format='channels_last',
         name='conv_2',
         kernel_regularizer=tf.nn.l2_loss)
@@ -361,9 +360,9 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
     flattened = tf.layers.flatten(batch_norm2)
 
     dense = tf.layers.dense(
-        inputs=flattened, units=512, activation=tf.nn.relu, name="conv_fc",
-        kernel_initializer=tf.orthogonal_initializer(), use_bias=True,
-        bias_initializer=tf.ones_initializer(),
+        inputs=flattened, units=256, activation=tf.nn.relu, name="conv_fc",
+        kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
+        bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
 
     if batch_norm:

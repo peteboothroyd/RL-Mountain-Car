@@ -7,4 +7,5 @@ tmp/**/*
 *.json
 *.mp4
 model_out/**/*
+archived_model_out/**/*
 support_values
