@@ -12,6 +12,13 @@ from baselines.common import set_global_seeds
 from a2c_policy import A2CPolicy
 from a2c_runner import A2CRunner
 
+# import matplotlib
+# matplotlib.use('AGG')
+# import matplotlib.lines as mlines
+# import matplotlib.pyplot as plt
+# from matplotlib import cm
+# from matplotlib.ticker import FormatStrFormatter, LinearLocator
+# from mpl_toolkits.mplot3d import Axes3D
 
 class A2CAgent(object):
   def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
@@ -93,6 +100,9 @@ class A2CAgent(object):
 
           if self._tensorboard_summaries:
             self._summary_writer.add_summary(summary, self._step)
+        
+        # if self._step % 250 == 0:
+        #   plot_value_function(self._policy.critic, self._step)
     except:
       # Reraise to allow early termination of learning, and display
       # of learned optimal behaviour.
@@ -118,3 +128,28 @@ class A2CAgent(object):
   def _graph_initialized(self):
     uninitialized_vars = self._sess.run(tf.report_uninitialized_variables())
     return True if uninitialized_vars.shape[0] == 0 else False
+
+# def plot_value_function(value_function, step):
+#   fig = plt.figure()
+#   ax = fig.gca(projection='3d')
+
+#   x_fine = np.linspace(-1.0, 1.0, num=250)
+#   x_dot_fine = np.linspace(-2.0, 2.0, num=250)
+
+#   x, x_dot = np.meshgrid(x_fine, x_dot_fine)
+#   x_flat, x_dot_flat = x.flatten(), x_dot.flatten()
+#   states = np.array(list(zip(x_flat, x_dot_flat)))
+#   predicted_vals = value_function(states)
+#   predicted_vals = predicted_vals.reshape((250, 250))
+#   surf = ax.plot_surface(x, x_dot, predicted_vals,
+#                           cmap=cm.rainbow, antialiased=True, linewidth=0.001)
+
+#   # Customize the z axis.
+#   ax.set_zlim(np.amin(predicted_vals), np.amax(predicted_vals))
+#   ax.zaxis.set_major_locator(LinearLocator(10))
+#   ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
+
+#   # Add a color bar which maps values to colors.
+#   fig.colorbar(surf, shrink=0.5, aspect=5)
+#   plt.savefig("./fig_out/val%s.png" % step, dpi=300)
+#   plt.close()

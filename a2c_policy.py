@@ -16,26 +16,21 @@ class A2CPolicy(object):
       ret - returns
   '''
 
-  ENT_THRESHOL = 0.4
-
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
                initial_ent_coeff=0.01, initial_learning_rate=7e-4,
-               batch_norm=False, decay_ent=False, adam=False):
+               batch_norm=False, decay_ent=True, adam=False):
     #TODO: Remove hardcoded decay_steps from decays
     lrt = tf.train.polynomial_decay(
-        learning_rate=initial_learning_rate, end_learning_rate=1e-4,
-        decay_steps=int(1e5),
+        learning_rate=initial_learning_rate, end_learning_rate=0,
+        decay_steps=int(6e4),
         global_step=tf.train.get_or_create_global_step())
     tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
       ent_coeff = tf.train.polynomial_decay(
-          learning_rate=initial_ent_coeff, decay_steps=int(30000),
+          learning_rate=initial_ent_coeff, decay_steps=int(6e4),
           global_step=tf.train.get_or_create_global_step(),
-          end_learning_rate=0.005)
-      # ent_coeff = tf.train.exponential_decay(
-      #     learning_rate=initial_ent_coeff, decay_steps=150, decay_rate=0.99,
-      #     global_step=tf.train.get_or_create_global_step())
+          end_learning_rate=0.001)
     else:
       ent_coeff = initial_ent_coeff
     tf.summary.scalar('ent_coeff', ent_coeff)
@@ -73,15 +68,15 @@ class A2CPolicy(object):
       if discrete:
         act_logits = tf.layers.dense(
             inputs=hidden, units=act_dim, activation=tf.nn.relu,
-            use_bias=True, bias_initializer=tf.zeros_initializer(),
-            kernel_initializer=tf.glorot_normal_initializer(),
+            use_bias=True, bias_initializer=tf.ones_initializer(),
+            kernel_initializer=tf.orthogonal_initializer(),
             kernel_regularizer=tf.nn.l2_loss)
         tf.summary.histogram('act_logits', act_logits)
       else:
         act_mean = tf.layers.dense(
             inputs=hidden, units=act_dim, activation=None,
-            kernel_initializer=tf.glorot_normal_initializer(),
-            bias_initializer=tf.zeros_initializer(), name='mean')
+            kernel_initializer=tf.orthogonal_initializer(),
+            bias_initializer=tf.ones_initializer(), name='mean')
         tf.summary.histogram('mean', act_mean)
 
         # Standard deviation of the normal distribution over actions
@@ -106,26 +101,28 @@ class A2CPolicy(object):
         tf.summary.histogram('sample_action', sample_act)
 
     with tf.name_scope('critic'):
-      critic_pred = tf.layers.dense(
+      critic_prediction = tf.layers.dense(
           inputs=hidden, units=1, kernel_regularizer=tf.nn.l2_loss,
-          kernel_initializer=tf.glorot_normal_initializer())
+          kernel_initializer=tf.orthogonal_initializer())
 
       # Rescale value predictions based on moments of returns
       if batch_norm:
-        critic_pred_mean, critic_pred_var = tf.nn.moments(
-            critic_pred, axes=[0])
-        critic_pred = critic_pred - critic_pred_mean + \
+        critic_prediction_mean, critic_prediction_var = tf.nn.moments(
+            critic_prediction, axes=[0])
+        critic_prediction = critic_prediction - critic_prediction_mean + \
             ret_batch_norm.moving_mean
-        critic_pred = tf.sqrt(ret_batch_norm.moving_variance) * critic_pred \
-            / (tf.sqrt(critic_pred_var)+1e-4)
+        critic_prediction = tf.sqrt(ret_batch_norm.moving_variance) \
+            * critic_prediction / (tf.sqrt(critic_prediction)+1e-4)
 
-        tf.summary.scalar('critic_pred_mean', tf.squeeze(critic_pred_mean))
-        tf.summary.scalar('critic_pred_var', tf.squeeze(critic_pred_var))
+        tf.summary.scalar(
+              'critic_prediction_mean', tf.squeeze(critic_prediction_mean))
+        tf.summary.scalar(
+              'critic_prediction_var', tf.squeeze(critic_prediction_var))
         tf.summary.scalar('returns_mean', tf.squeeze(
             ret_batch_norm.moving_mean))
         tf.summary.scalar('returns_var', tf.squeeze(
             ret_batch_norm.moving_variance))
-      tf.summary.histogram('critic_pred', critic_pred)
+      tf.summary.histogram('critic_prediction', critic_prediction)
 
     with tf.name_scope('log_prob'):
       log_prob = dist.log_prob(act, name='log_prob')
@@ -140,19 +137,14 @@ class A2CPolicy(object):
       actor_pg_loss = tf.reduce_mean(-log_prob * normalised_adv, name='loss')
       tf.summary.scalar('actor_pg_loss', actor_pg_loss)
 
-      actor_expl_loss = ent * ent_coeff
-      tf.summary.scalar('actor_expl_loss', actor_expl_loss)
-      # # Trouble seems to occur when the entropy of the distribution drops too low
-      # # add a large loss if the entropy drops too low
-      # ent_too_low_loss = tf.nn.relu(self.ENT_THRESHOL - ent) * 10.0
-      # tf.summary.scalar('actor_entropy', ent)
-      # actor_expl_loss += ent_too_low_loss
+      actor_explore_loss = ent * ent_coeff
+      tf.summary.scalar('actor_explore_loss', actor_explore_loss)
 
-      actor_total_loss = actor_pg_loss - actor_expl_loss
+      actor_total_loss = actor_pg_loss - actor_explore_loss
       tf.summary.scalar('actor_total_loss', actor_total_loss)
 
       critic_loss = tf.reduce_mean(
-          tf.square(critic_pred - normalised_ret))/2
+          tf.square(critic_prediction - normalised_ret))/2
       tf.summary.scalar('critic_loss', critic_loss)
 
       reg_loss = tf.losses.get_regularization_loss() * reg_coeff
@@ -164,7 +156,7 @@ class A2CPolicy(object):
     with tf.name_scope('train_network'):
       if adam:
         optimizer = tf.train.AdamOptimizer(
-            learning_rate=lrt, epsilon=1e-5, beta2=0.99) #decay=0.99, epsilon=1e-5
+            learning_rate=lrt, epsilon=1e-3, beta2=0.99)
       else:
         optimizer = tf.train.RMSPropOptimizer(
             learning_rate=lrt, decay=0.99, epsilon=1e-5)
@@ -209,7 +201,7 @@ class A2CPolicy(object):
           is_training: False
       }
 
-      values = sess.run(critic_pred, feed_dict=feed_dict)
+      values = sess.run(critic_prediction, feed_dict=feed_dict)
 
       return values
 
@@ -229,7 +221,7 @@ class A2CPolicy(object):
       }
 
       actions, values = sess.run(
-          [sample_act, critic_pred], feed_dict=feed_dict)
+          [sample_act, critic_prediction], feed_dict=feed_dict)
 
       return actions, values
 
@@ -245,7 +237,7 @@ class A2CPolicy(object):
       # Returns
         pg_loss:              The policy gradient loss
         val_loss:             The critic loss
-        expl_loss:            The actor exploration loss
+        explore_loss:         The actor exploration loss
         regularization_loss:  The regularization loss
         ent:                  The policy entropy
       '''
@@ -259,12 +251,13 @@ class A2CPolicy(object):
           is_training: True
       }
 
-      _, pg_loss, val_loss, exploration_loss, regularization_loss, entropy, summary = \
+      _, pg_loss, val_loss, expl_loss, regularization_loss, entropy, summary = \
           sess.run([train_op, actor_pg_loss, critic_loss,
-                    actor_expl_loss, reg_loss, ent, summaries],
+                    actor_explore_loss, reg_loss, ent, summaries],
                    feed_dict=feed_dict)
 
-      return pg_loss, val_loss, exploration_loss, regularization_loss, entropy, summary
+      return pg_loss, val_loss, expl_loss, regularization_loss, \
+          entropy, summary
 
 
     def reset():
@@ -281,6 +274,8 @@ class A2CPolicy(object):
 
 
 def _generate_bounded_continuous_sample_action(dist, ac_space):
+  #TODO: This currently is only suitable for scalar actions. Generalise for
+  #      arbitrary dimensions.
   bounded_sample = tf.nn.tanh(dist.sample(), name='sample_action')
   scaled_shifted_sample = bounded_sample \
       * (ac_space.high[0]-ac_space.low[0]) * 0.5 \
@@ -297,8 +292,8 @@ def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
       hidden = tf.layers.dense(
           inputs=hidden, units=size, activation=activation,
           name="dense_{}".format(i), use_bias=True,
-          bias_initializer=tf.zeros_initializer(),
-          kernel_initializer=tf.glorot_normal_initializer(),
+          bias_initializer=tf.ones_initializer(),
+          kernel_initializer=tf.orthogonal_initializer(),
           kernel_regularizer=tf.nn.l2_loss)
 
       tf.summary.histogram('dense{0}_activation'.format(i), hidden)
@@ -326,9 +321,9 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
         strides=[4, 4],
         padding="same",
         activation=tf.nn.relu,
-        kernel_initializer=tf.glorot_normal_initializer(),
+        kernel_initializer=tf.orthogonal_initializer(),
         use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
+        bias_initializer=tf.ones_initializer(),
         data_format='channels_last',
         name='conv_1',
         kernel_regularizer=tf.nn.l2_loss)
@@ -348,9 +343,9 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
         strides=[2, 2],
         padding="same",
         activation=tf.nn.relu,
-        kernel_initializer=tf.glorot_normal_initializer(),
+        kernel_initializer=tf.orthogonal_initializer(),
         use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
+        bias_initializer=tf.ones_initializer(),
         data_format='channels_last',
         name='conv_2',
         kernel_regularizer=tf.nn.l2_loss)
@@ -367,8 +362,8 @@ def _build_cnn(input_placeholder, is_training, scope, batch_norm):
 
     dense = tf.layers.dense(
         inputs=flattened, units=512, activation=tf.nn.relu, name="conv_fc",
-        kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
+        kernel_initializer=tf.orthogonal_initializer(), use_bias=True,
+        bias_initializer=tf.ones_initializer(),
         kernel_regularizer=tf.nn.l2_loss)
 
     if batch_norm:
@@ -389,7 +384,7 @@ def _train_with_batch_norm_update(optimizer, grads_and_vars):
   return train_op
 
 
-def _clip_by_global_norm(grads_and_vars, norm=0.5):
+def _clip_by_global_norm(grads_and_vars, norm=1.0):
   grads, variables = zip(*grads_and_vars)
   clipped_grads, _ = tf.clip_by_global_norm(grads, norm)
   return zip(clipped_grads, variables)
@@ -397,7 +392,7 @@ def _clip_by_global_norm(grads_and_vars, norm=0.5):
 
 def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
   if discrete:
-    act = tf.placeholder(dtype=tf.int32, shape=[None], name='act')
+    act = tf.placeholder(dtype=tf.int32, shape=[None, 1], name='act')
   else:
     act = tf.placeholder(
         dtype=tf.float32, shape=[None, act_dim], name='act')

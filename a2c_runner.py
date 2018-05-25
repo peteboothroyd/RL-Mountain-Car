@@ -15,6 +15,7 @@ class A2CRunner(object):
     self._gamma = gamma
     self._discrete = discrete
 
+    self._act_dim = 1 if discrete else env.action_space.shape[0]
     self._batch_obs_shape = (n_steps*n_envs,) \
         + self._env.observation_space.shape
     self._dones = [False for _ in range(n_envs)]
@@ -32,7 +33,6 @@ class A2CRunner(object):
       rollout_observations ([[tf.float32]]): List of observations for the
           rollouts, (dimension [-1, obs_dim])
     '''
-
     rollout_rewards, rollout_actions, rollout_observations = [], [], []
     rollout_dones, rollout_values = [], []
 
@@ -47,6 +47,7 @@ class A2CRunner(object):
       rollout_rewards.append(rewards)
       rollout_dones.append(self._dones)
 
+    # Store last values, $v(x_{n_steps+1})$ for bootstrapping the returns
     last_values = self._policy.critic(self._obs)
 
     obs_dtype = self._env.observation_space.dtype
@@ -55,16 +56,15 @@ class A2CRunner(object):
     # Switch lists of [n_steps, n_envs] to [n_envs, n_steps]
     rollout_observations = np.array(rollout_observations, dtype=obs_dtype)\
         .swapaxes(1, 0).reshape(self._batch_obs_shape)
-    rollout_actions = np.array(rollout_actions, dtype=act_dtype)
     rollout_actions = np.array(rollout_actions, dtype=act_dtype).swapaxes(1, 0)
-    rollout_values = np.array(rollout_values).swapaxes(1, 0)
-    rollout_dones = np.array(rollout_dones).swapaxes(1, 0)
-    rollout_rewards = np.array(rollout_rewards).swapaxes(1, 0)
+    rollout_values = np.array(rollout_values, dtype=np.float32).swapaxes(1, 0)
+    rollout_dones = np.array(rollout_dones, dtype=np.bool).swapaxes(1, 0)
+    rollout_rewards = np.array(rollout_rewards, dtype=np.float32).swapaxes(1, 0)
 
     rollout_returns = self._compute_future_returns(
         rollout_rewards, rollout_dones, last_values)
 
-    rollout_actions = rollout_actions.flatten()
+    rollout_actions = rollout_actions.reshape(-1, self._act_dim)
     rollout_values = rollout_values.reshape(-1, 1)
     rollout_returns = rollout_returns.reshape(-1, 1)
 
@@ -72,20 +72,21 @@ class A2CRunner(object):
         rollout_observations, rollout_values
 
   def _compute_future_returns(self, rewards, dones, last_values):
-    ''' Compute the future returns for a given rollout of immediate rewards.
+    r'''Compute the future returns for a given rollout of immediate rewards.
         Used for GMDP algorithm. Each row contains the data for each
         environment.
 
     # Params:
-      rewards ([[float]]): List of immediate rewards at different time steps for
-          multiple rollouts (dimension [n_steps, n_envs])
-      dones: ([[bool]]): List of done flags for each step
-          (dimension [n_steps, n_envs])
-      values: ([[float]]): List of values (dimension [n_steps, n_envs])
+      rewards ([[float]]): Immediate rewards at different time steps for
+          multiple rollouts (dimension [n_envs, n_steps])
+      dones: ([[bool]]): Done flags for each step
+          (dimension [n_envs, n_steps])
+      last_values: ([[float]]): Values of last states in rollout
+         (dimension [n_envs, n_steps])
 
     # Returns:
-      returns ([float]): List of returns from that timestep onwards
-          $\sum_{h=t}^{T-1}r_h$ (dimension [n_steps, n_envs])
+      returns ([float]): Returns from that timestep onwards
+          $\sum_{h=t}^{T-1}r_h$ (dimension [n_envs, n_steps])
     '''
     returns = []
 
@@ -115,6 +116,6 @@ class A2CRunner(object):
       rollout_returns = list(reversed(rollout_returns))
       returns.append(rollout_returns)
 
-    returns = np.array(returns)
+    returns = np.array(returns, dtype=np.float32)
 
     return returns

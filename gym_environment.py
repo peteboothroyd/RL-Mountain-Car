@@ -28,7 +28,8 @@ class Continuous_MountainCarEnv(gym.Env):
       'video.frames_per_second': 30
   }
 
-  def __init__(self, gaussian_reward_scale=None, t_step=0.3, terminating=False, hard=False):
+  def __init__(self, gaussian_reward_scale=None, t_step=0.3, 
+               terminating=False, hard=False):
     self._min_action = -4.0              #  measured in Nm
     self._max_action = 4.0               #  measured in Nm
     self._last_action = 0.0              #  measured in Nm (used for render)
@@ -71,8 +72,6 @@ class Continuous_MountainCarEnv(gym.Env):
     return [seed]
 
   def step(self, action):
-    self._last_action = action
-
     def acceleration(current_x, action):
       G = 9.81
       return action - G * math.sin(math.atan(self._gradient(current_x)))
@@ -83,6 +82,7 @@ class Continuous_MountainCarEnv(gym.Env):
       return [speed, accel]
 
     action = np.clip(action, self._min_action, self._max_action)
+    self._last_action = action
 
     t = np.linspace(0, self._t_step, 101)
     sol = odeint(diff, self._state, t, args=(action,))
@@ -104,7 +104,9 @@ class Continuous_MountainCarEnv(gym.Env):
     # if velocity <= self._min_velocity:
     #   velocity = self._min_velocity
 
-    reward, done = self._reward([position, velocity])
+    done = self._done([position, velocity])
+
+    reward = self._reward([position, velocity], done)
     self._state = np.array([position, velocity])
 
     return self._state, reward, done, {}
@@ -128,20 +130,18 @@ class Continuous_MountainCarEnv(gym.Env):
       self._state = np.array(state)
     return self._state
 
-  def _reward(self, next_state):
+  def _reward(self, next_state, done):
     reward = 0
-    done = self._done(next_state)
-
     if self._gaussian_reward:
-      reward = multivariate_normal.pdf(next_state,
-                                       [self._goal_position, self._goal_velocity],
-                                       self._gaussian_reward_length_scale**2)
+      reward = multivariate_normal.pdf(
+          next_state, [self._goal_position, self._goal_velocity],
+          self._gaussian_reward_length_scale**2)
     elif done:
       reward = 100
 
-    reward = reward - self._t_step
+    # reward = reward #- self._t_step
 
-    return reward, done
+    return reward
 
   def get_state(self):
     return self._state
