@@ -18,19 +18,20 @@ class A2CPolicy(object):
 
   def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
                initial_ent_coeff=0.01, initial_learning_rate=7e-4,
-               batch_norm=True, decay_ent=True, adam=True):
+               batch_norm=False, decay_ent=True, adam=True):
     #TODO: Remove hardcoded decay_steps from decays
+    decay_steps = int(6e4)
     lrt = tf.train.polynomial_decay(
         learning_rate=initial_learning_rate, end_learning_rate=0,
-        decay_steps=int(1e5),
+        decay_steps=decay_steps,
         global_step=tf.train.get_or_create_global_step())
     tf.summary.scalar('lrt', lrt)
 
     if decay_ent:
       ent_coeff = tf.train.polynomial_decay(
-          learning_rate=initial_ent_coeff, decay_steps=int(1e5),
+          learning_rate=initial_ent_coeff, decay_steps=decay_steps,
           global_step=tf.train.get_or_create_global_step(),
-          end_learning_rate=0.001)
+          end_learning_rate=0.005)
     else:
       ent_coeff = initial_ent_coeff
     tf.summary.scalar('ent_coeff', ent_coeff)

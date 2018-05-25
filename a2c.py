@@ -48,13 +48,11 @@ def main():
       gamma=args.gamma,
       tensorboard_summaries=args.tensorboard_summaries,
       cnn=cnn,
-      seed=args.seed)
+      seed=args.seed,
+      save_every=args.save_every)
 
   # Teach the agent how to act optimally
-  try:
-    agent.learn()
-  finally:
-    env.close()
+  agent.learn()
 
 
 def command_line_args():
@@ -75,19 +73,15 @@ def command_line_args():
   parser.add_argument(
       '--debug', action='store_true', help='debug the application')
   parser.add_argument(
-      '--summary_every', type=int, help='summary every n episodes', default=25)
+      '--summary_every', type=int, help='summary every n steps', default=25)
+  parser.add_argument(
+      '--save_every', type=int, help='save every n steps', default=100)
   parser.add_argument(
       '--gamma', type=float, default=0.99,
       help='value of gamma for Bellman equations')
   parser.add_argument(
       '--tensorboard_summaries', action='store_false',
       help='store diagnostics for tensorboard')
-  parser.add_argument(
-      '--actor_expl_loss', action='store_false',
-      help='include exploration loss')
-  parser.add_argument(
-      '--actor_reg_loss', action='store_false',
-      help='include regularisation loss')
   parser.add_argument(
       '--env_id', choices=[MOUNTAIN_CAR_ID, BREAKOUT_ID], default=BREAKOUT_ID,
       help='The environment to use for the A2C algorithm (default: {0})'\
@@ -99,12 +93,13 @@ def command_line_args():
         the policy.')
   parser.add_argument(
       '--num_env',
-      help="The number of different environments", type=int, default=64)
+      help="The number of different environments", type=int, default=16)
   parser.add_argument(
       '--seed', help='The random number generator seed', default=1, type=int)
   return parser.parse_args()
 
-def make_env(env_factory, num_env, seed, wrapper_kwargs=None, start_index=0, deepmind=True):
+def make_env(env_factory, num_env, seed, wrapper_kwargs=None, start_index=0, 
+             deepmind=True):
   """
   Create a wrapped, monitored SubprocVecEnv for Atari. Note this is altered from
   the OpenAI baselines repo:

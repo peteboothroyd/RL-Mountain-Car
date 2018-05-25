@@ -12,17 +12,11 @@ from baselines.common import set_global_seeds
 from a2c_policy import A2CPolicy
 from a2c_runner import A2CRunner
 
-# import matplotlib
-# matplotlib.use('AGG')
-# import matplotlib.lines as mlines
-# import matplotlib.pyplot as plt
-# from matplotlib import cm
-# from matplotlib.ticker import FormatStrFormatter, LinearLocator
-# from mpl_toolkits.mplot3d import Axes3D
 
 class A2CAgent(object):
   def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
-               summary_every, num_learning_steps, seed, tensorboard_summaries):
+               summary_every, num_learning_steps, seed, tensorboard_summaries,
+               save_every):
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
     num_cpu = multiprocessing.cpu_count()
@@ -30,9 +24,11 @@ class A2CAgent(object):
         inter_op_parallelism_threads=num_cpu,
         intra_op_parallelism_threads=num_cpu)
     self._sess = tf.Session(config=tf_config)
+    self._saver = None
 
     self._step = 0
     self._summary_every = summary_every
+    self._save_every = save_every
     self._seed = seed
 
     # Wrap the session in a CLI debugger
@@ -60,11 +56,6 @@ class A2CAgent(object):
     if not self._graph_initialized():
       raise Exception('Graph not initialised!')
 
-  # def act(self, observation):
-  #   ''' Given an observation of the state return an action
-  #       according to the current policy parameterisation.
-  #   '''
-  #   return self._policy.actor(observation[np.newaxis, :])
 
   def learn(self):
     ''' Learn an optimal policy parameterisation by
@@ -100,13 +91,9 @@ class A2CAgent(object):
 
           if self._tensorboard_summaries:
             self._summary_writer.add_summary(summary, self._step)
-        
-        # if self._step % 250 == 0:
-        #   plot_value_function(self._policy.critic, self._step)
-    except:
-      # Reraise to allow early termination of learning, and display
-      # of learned optimal behaviour.
-      raise
+
+        if self._step % self._save_every == 0 and self._step > 0:
+          self.save_model()
     finally:
       # Save out necessary checkpoints & diagnostics
       self._close()
@@ -115,41 +102,19 @@ class A2CAgent(object):
     self._policy.reset()
 
   def _close(self):
-    save_model_path = os.path.join(self._model_dir, 'model.ckpt')
-    self._save_model(save_model_path)
+    self._env.close()
 
     if self._tensorboard_summaries:
       self._summary_writer.close()
 
-  def _save_model(self, save_path):
-    saver = tf.train.Saver()
-    saver.save(self._sess, save_path=save_path)
+  def save_model(self):
+    if self._saver is None:
+      self._save_every = tf.train.Saver()
+    save_model_path = os.path.join(self._model_dir, 'model')
+
+    self._saver.save(
+        self._sess, save_path=save_model_path, global_step=self._step)
 
   def _graph_initialized(self):
     uninitialized_vars = self._sess.run(tf.report_uninitialized_variables())
     return True if uninitialized_vars.shape[0] == 0 else False
-
-# def plot_value_function(value_function, step):
-#   fig = plt.figure()
-#   ax = fig.gca(projection='3d')
-
-#   x_fine = np.linspace(-1.0, 1.0, num=250)
-#   x_dot_fine = np.linspace(-2.0, 2.0, num=250)
-
-#   x, x_dot = np.meshgrid(x_fine, x_dot_fine)
-#   x_flat, x_dot_flat = x.flatten(), x_dot.flatten()
-#   states = np.array(list(zip(x_flat, x_dot_flat)))
-#   predicted_vals = value_function(states)
-#   predicted_vals = predicted_vals.reshape((250, 250))
-#   surf = ax.plot_surface(x, x_dot, predicted_vals,
-#                           cmap=cm.rainbow, antialiased=True, linewidth=0.001)
-
-#   # Customize the z axis.
-#   ax.set_zlim(np.amin(predicted_vals), np.amax(predicted_vals))
-#   ax.zaxis.set_major_locator(LinearLocator(10))
-#   ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
-
-#   # Add a color bar which maps values to colors.
-#   fig.colorbar(surf, shrink=0.5, aspect=5)
-#   plt.savefig("./fig_out/val%s.png" % step, dpi=300)
-#   plt.close()

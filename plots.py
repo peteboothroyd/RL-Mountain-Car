@@ -1,7 +1,9 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from scipy.stats import multivariate_normal
+import pandas as pd
 
 def gaussian_reward():
   X, X_DOT = np.meshgrid(np.linspace(-1,1,num=250), np.linspace(-2,2,num=250))
@@ -38,6 +40,28 @@ def hill():
   plt.ylim([-0.3,0.5])
   plt.show()
 
+def entropy_plot():
+  entropy_csv = pd.read_csv('/Users/peterboothroyd/Downloads/entropy.csv')
+  pg_loss_csv = pd.read_csv('/Users/peterboothroyd/Downloads/pg_loss.csv')
+
+  # data = pg_loss_csv.values
+  data = entropy_csv.values
+
+  vals = data[:,2]
+  t_steps = data[:,1]*80
+
+  N=10
+  averaged_vals = np.convolve(vals, np.ones((N,))/N, mode='same')
+
+  fig, ax = plt.subplots()
+  ax.plot(t_steps, averaged_vals)
+  ax.set_xlabel("Training Step")
+  ax.set_ylabel("Policy Gradient Loss")
+  ax.set_ylim(0, 1.5)
+  # ax.set_title('Destabilised Policy Gradient Loss during Entropy Collapse')
+  ax.set_title('Collapsing Entropy during A2C Learning ')
+  ax.get_xaxis().set_major_formatter(ticker.FormatStrFormatter('%0.00e'))
+  plt.show()
 
 if __name__ == "__main__":
-  gaussian_reward()
+  entropy_plot()
