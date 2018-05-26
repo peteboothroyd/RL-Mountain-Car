@@ -11,12 +11,13 @@ from baselines.common import set_global_seeds
 
 from a2c_policy import A2CPolicy
 from a2c_runner import A2CRunner
+from plots import value_rollout_plot
 
 
 class A2CAgent(object):
   def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
                summary_every, num_learning_steps, seed, tensorboard_summaries,
-               save_every):
+               save_every, load_checkpoint, checkpoint_prefix):
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
     num_cpu = multiprocessing.cpu_count()
@@ -37,13 +38,14 @@ class A2CAgent(object):
 
     self._model_dir = model_dir+'/model'
     self._tensorboard_summaries = tensorboard_summaries
-    self._num_learning_steps = num_learning_steps
     self._env = env
-    self._batch_size = n_steps*env.num_envs
+
+    batch_size = n_steps*env.num_envs
+    self._num_policy_updates = num_learning_steps//batch_size
 
     self._policy = A2CPolicy(
         sess=self._sess, obs_space=env.observation_space, cnn=cnn,
-        act_space=env.action_space)
+        act_space=env.action_space, num_policy_updates=self._num_policy_updates)
     self._runner = A2CRunner(
         policy=self._policy, env=env, n_steps=n_steps, gamma=gamma,
         discrete=discrete)
@@ -56,6 +58,36 @@ class A2CAgent(object):
     if not self._graph_initialized():
       raise Exception('Graph not initialised!')
 
+    if load_checkpoint:
+      self.load(checkpoint_prefix)
+
+  def load(self, checkpoint_file_prefix):
+    ''' Load a trained model from saved checkpoint files.
+
+      # Params:
+        checkpoint_file_prefix (str): The prefix of all checkpoint files to
+            load. This is not an actual file. Example, if checkpoint files are
+            stored in directory /tmp/checkpoint_files and all 3 files begin with
+            'model' then provide '/tmp/checkpoint_files/model'.
+
+    '''
+    saver = tf.train.Saver()
+    saver.restore(self._sess, checkpoint_file_prefix)
+
+  def evaluate(self):
+    ''' Evaluate a learned model by rolling out the policy. '''
+    obs = self._env.reset()
+    rollout_values = []
+    done_counter = 0
+
+    while done_counter < 10:
+      actions, values = self._policy.step(obs)
+      obs, _, dones, _ = self._env.step(actions)
+      if dones[0]:
+        done_counter += 1
+      rollout_values.append(np.squeeze(values))
+
+    value_rollout_plot(rollout_values)
 
   def learn(self):
     ''' Learn an optimal policy parameterisation by
@@ -66,7 +98,7 @@ class A2CAgent(object):
     start_time = time.time()
 
     try:
-      for self._step in range(self._num_learning_steps//self._batch_size):
+      for self._step in range(self._num_policy_updates):
         summarise = self._step % self._summary_every == 0
 
         returns, actions, observations, values = \
@@ -109,8 +141,8 @@ class A2CAgent(object):
 
   def save_model(self):
     if self._saver is None:
-      self._save_every = tf.train.Saver()
-    save_model_path = os.path.join(self._model_dir, 'model')
+      self._saver = tf.train.Saver()
+    save_model_path = os.path.join(self._model_dir, 'model.ckpt')
 
     self._saver.save(
         self._sess, save_path=save_model_path, global_step=self._step)

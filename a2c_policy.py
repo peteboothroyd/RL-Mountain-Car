@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 import gym
 
+MAX_PIXEL_VALUE = 255.0
+
 
 class A2CPolicy(object):
   '''The policy for the A2C algorithm. Can deal with discrete and continuous
@@ -16,33 +18,21 @@ class A2CPolicy(object):
       ret - returns
   '''
 
-  def __init__(self, sess, obs_space, act_space, cnn, reg_coeff=0,
-               initial_ent_coeff=0.01, initial_learning_rate=7e-4,
+  def __init__(self, sess, obs_space, act_space, cnn, num_policy_updates,
+               reg_coeff=0, initial_ent_coeff=0.01, initial_learning_rate=1e-3,
                batch_norm=False, decay_ent=True, adam=True):
-    #TODO: Remove hardcoded decay_steps from decays
-    decay_steps = int(6e4)
-    lrt = tf.train.polynomial_decay(
-        learning_rate=initial_learning_rate, end_learning_rate=0,
-        decay_steps=decay_steps,
-        global_step=tf.train.get_or_create_global_step())
-    tf.summary.scalar('lrt', lrt)
-
+    lrt_scheduler = Scheduler(initial_learning_rate, 0, num_policy_updates)
     if decay_ent:
-      ent_coeff = tf.train.polynomial_decay(
-          learning_rate=initial_ent_coeff, decay_steps=decay_steps,
-          global_step=tf.train.get_or_create_global_step(),
-          end_learning_rate=0.005)
+      ent_scheduler = Scheduler(initial_ent_coeff, 0.005, int(6e4))
     else:
-      ent_coeff = initial_ent_coeff
-    tf.summary.scalar('ent_coeff', ent_coeff)
+      ent_scheduler = Scheduler(initial_ent_coeff, initial_ent_coeff, 1)
 
     discrete = isinstance(act_space, gym.spaces.Discrete)
 
     act_dim = act_space.n if discrete else act_space.shape[0]
-    print('act_dim', act_dim)
 
     with tf.name_scope('inputs'):
-      adv, obs, is_training, act, ret = _create_input_placeholders(
+      adv, obs, is_training, act, ret, lrt, ent_coeff = _create_input_placeholders(
           act_dim, obs_space, discrete, cnn)
 
       if batch_norm:
@@ -58,14 +48,15 @@ class A2CPolicy(object):
         normalised_ret = ret
         normalised_adv = adv
 
-    with tf.name_scope('action'):
+    with tf.name_scope('hidden'):
       if cnn:
-        hidden = _build_cnn(obs, is_training, 'hidden', batch_norm)
+        hidden = _build_cnn(obs, is_training, batch_norm)
       else:
         hidden = _build_mlp(
-            obs, is_training, 'hidden', activation=tf.nn.tanh, size=64)
+            obs, is_training, activation=tf.nn.tanh, size=64)
       tf.summary.histogram('hidden_output', hidden)
 
+    with tf.name_scope('action'):
       if discrete:
         act_logits = tf.layers.dense(
             inputs=hidden, units=act_dim, activation=tf.nn.relu,
@@ -113,12 +104,12 @@ class A2CPolicy(object):
         critic_prediction = critic_prediction - critic_prediction_mean + \
             ret_batch_norm.moving_mean
         critic_prediction = tf.sqrt(ret_batch_norm.moving_variance) \
-            * critic_prediction / (tf.sqrt(critic_prediction)+1e-4)
+            * critic_prediction / (tf.sqrt(critic_prediction_var)+1e-4)
 
         tf.summary.scalar(
-              'critic_prediction_mean', tf.squeeze(critic_prediction_mean))
+            'critic_prediction_mean', tf.squeeze(critic_prediction_mean))
         tf.summary.scalar(
-              'critic_prediction_var', tf.squeeze(critic_prediction_var))
+            'critic_prediction_var', tf.squeeze(critic_prediction_var))
         tf.summary.scalar('returns_mean', tf.squeeze(
             ret_batch_norm.moving_mean))
         tf.summary.scalar('returns_var', tf.squeeze(
@@ -243,12 +234,18 @@ class A2CPolicy(object):
       '''
       advantages = returns - values
 
+      global_step = tf.train.get_or_create_global_step().eval(session=sess)
+      curr_lrt = lrt_scheduler.current_value(global_step)
+      curr_ent_coeff = ent_scheduler.current_value(global_step)
+
       feed_dict = {
           obs: observations,
           ret: returns,
           adv: advantages,
           act: actions,
-          is_training: True
+          is_training: True,
+          lrt: curr_lrt,
+          ent_coeff: curr_ent_coeff
       }
 
       _, pg_loss, val_loss, expl_loss, regularization_loss, entropy, summary = \
@@ -274,7 +271,7 @@ class A2CPolicy(object):
 
 
 def _generate_bounded_continuous_sample_action(dist, ac_space):
-  #TODO: This currently is only suitable for scalar actions. Generalise for
+  # TODO: This currently is only suitable for scalar actions. Generalise for
   #      arbitrary dimensions.
   bounded_sample = tf.nn.tanh(dist.sample(), name='sample_action')
   scaled_shifted_sample = bounded_sample \
@@ -284,98 +281,97 @@ def _generate_bounded_continuous_sample_action(dist, ac_space):
   return scaled_shifted_sample
 
 
-def _build_mlp(input_placeholder, is_training, scope, n_layers=2,
+def _build_mlp(input_placeholder, is_training, n_layers=2,
                size=64, activation=tf.nn.relu):
-  with tf.variable_scope(scope):
-    hidden = input_placeholder
-    for i in range(n_layers):
-      hidden = tf.layers.dense(
-          inputs=hidden, units=size, activation=activation,
-          name="dense_{}".format(i), use_bias=True,
-          bias_initializer=tf.zeros_initializer(),
-          kernel_initializer=tf.glorot_normal_initializer(),
-          kernel_regularizer=tf.nn.l2_loss)
+  hidden = input_placeholder
+  for i in range(n_layers):
+    hidden = tf.layers.dense(
+        inputs=hidden, units=size, activation=activation,
+        name="dense_{}".format(i), use_bias=True,
+        bias_initializer=tf.zeros_initializer(),
+        kernel_initializer=tf.glorot_normal_initializer(),
+        kernel_regularizer=tf.nn.l2_loss)
 
-      tf.summary.histogram('dense{0}_activation'.format(i), hidden)
+    tf.summary.histogram('dense{0}_activation'.format(i), hidden)
 
-      hidden = tf.layers.batch_normalization(
-          hidden, training=is_training, renorm=True)
-      tf.summary.histogram('dense{0}_batch_norm'.format(i), hidden)
+    hidden = tf.layers.batch_normalization(
+        hidden, training=is_training, renorm=True)
+    tf.summary.histogram('dense{0}_batch_norm'.format(i), hidden)
 
   return hidden
 
 
-def _build_cnn(input_placeholder, is_training, scope, batch_norm):
+def _build_cnn(input_placeholder, is_training, batch_norm):
   # The CNN architecture as described in the A3C Paper
-  with tf.variable_scope(scope):
-    if batch_norm:
-      batch_norm_in = tf.layers.batch_normalization(
-          inputs=input_placeholder, training=is_training, renorm=True)
-    else:
-      batch_norm_in = input_placeholder
+  scaled_obs = tf.cast(input_placeholder, tf.float32) / MAX_PIXEL_VALUE
 
-    conv1 = tf.layers.conv2d(
-        inputs=batch_norm_in,
-        filters=16,
-        kernel_size=[8, 8],
-        strides=[4, 4],
-        padding="same",
-        activation=tf.nn.relu,
-        kernel_initializer=tf.glorot_normal_initializer(),
-        use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
-        data_format='channels_last',
-        name='conv_1',
-        kernel_regularizer=tf.nn.l2_loss)
-    tf.summary.histogram('conv_1', conv1)
+  if batch_norm:
+    scaled_obs = tf.layers.batch_normalization(
+        inputs=scaled_obs, training=is_training, renorm=True)
 
-    if batch_norm:
-      batch_norm1 = tf.layers.batch_normalization(
-          inputs=conv1, training=is_training, renorm=True)
-      tf.summary.histogram('conv_batch_norm1', batch_norm1)
-    else:
-      batch_norm1 = conv1
+  conv1 = tf.layers.conv2d(
+      inputs=scaled_obs,
+      filters=16,
+      kernel_size=[8, 8],
+      strides=[4, 4],
+      padding="same",
+      activation=tf.nn.relu,
+      kernel_initializer=tf.glorot_normal_initializer(),
+      use_bias=True,
+      bias_initializer=tf.zeros_initializer(),
+      data_format='channels_last',
+      name='conv_1',
+      kernel_regularizer=tf.nn.l2_loss)
+  tf.summary.histogram('conv_1', conv1)
 
-    conv2 = tf.layers.conv2d(
-        inputs=batch_norm1,
-        filters=32,
-        kernel_size=[4, 4],
-        strides=[2, 2],
-        padding="same",
-        activation=tf.nn.relu,
-        kernel_initializer=tf.glorot_normal_initializer(),
-        use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
-        data_format='channels_last',
-        name='conv_2',
-        kernel_regularizer=tf.nn.l2_loss)
-    tf.summary.histogram('conv_2', conv2)
+  if batch_norm:
+    batch_norm1 = tf.layers.batch_normalization(
+        inputs=conv1, training=is_training, renorm=True)
+    tf.summary.histogram('conv_batch_norm1', batch_norm1)
+  else:
+    batch_norm1 = conv1
 
-    if batch_norm:
-      batch_norm2 = tf.layers.batch_normalization(
-          inputs=conv2, training=is_training, renorm=True)
-      tf.summary.histogram('conv_batch_norm2', batch_norm2)
-    else:
-      batch_norm2 = conv2
+  conv2 = tf.layers.conv2d(
+      inputs=batch_norm1,
+      filters=32,
+      kernel_size=[4, 4],
+      strides=[2, 2],
+      padding="same",
+      activation=tf.nn.relu,
+      kernel_initializer=tf.glorot_normal_initializer(),
+      use_bias=True,
+      bias_initializer=tf.zeros_initializer(),
+      data_format='channels_last',
+      name='conv_2',
+      kernel_regularizer=tf.nn.l2_loss)
+  tf.summary.histogram('conv_2', conv2)
 
-    flattened = tf.layers.flatten(batch_norm2)
+  if batch_norm:
+    batch_norm2 = tf.layers.batch_normalization(
+        inputs=conv2, training=is_training, renorm=True)
+    tf.summary.histogram('conv_batch_norm2', batch_norm2)
+  else:
+    batch_norm2 = conv2
 
-    dense = tf.layers.dense(
-        inputs=flattened, units=256, activation=tf.nn.relu, name="conv_fc",
-        kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
-        bias_initializer=tf.zeros_initializer(),
-        kernel_regularizer=tf.nn.l2_loss)
+  flattened = tf.layers.flatten(batch_norm2)
 
-    if batch_norm:
-      out = tf.layers.batch_normalization(
-          inputs=dense, training=is_training, renorm=True)
-    else:
-      out = dense
+  dense = tf.layers.dense(
+      inputs=flattened, units=256, activation=tf.nn.relu, name="conv_fc",
+      kernel_initializer=tf.glorot_normal_initializer(), use_bias=True,
+      bias_initializer=tf.zeros_initializer(),
+      kernel_regularizer=tf.nn.l2_loss)
 
-    return out
+  if batch_norm:
+    out = tf.layers.batch_normalization(
+        inputs=dense, training=is_training, renorm=True)
+  else:
+    out = dense
+
+  return out
 
 
 def _train_with_batch_norm_update(optimizer, grads_and_vars):
+  # NOTE: To update the moving batch_norm mean, and variances
   update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
   with tf.control_dependencies(update_ops):
     train_op = optimizer.apply_gradients(
@@ -402,17 +398,33 @@ def _create_input_placeholders(act_dim, obs_space, discrete, cnn):
 
   obs = tf.placeholder(
       dtype=obs_space.dtype, shape=(None,)+obs_space.shape, name='obs')
-  obs = tf.cast(obs, tf.float32) / 255.0
   ret = tf.placeholder(
       dtype=tf.float32, shape=[None, 1], name='returns')
   is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
+  lrt = tf.placeholder(tf.float32, shape=[], name='learning_rate')
+  ent_coeff = tf.placeholder(tf.float32, shape=[], name='entropy_coefficient')
+
+  tf.summary.scalar('lrt', lrt)
+  tf.summary.scalar('ent_coeff', ent_coeff)
 
   tf.summary.histogram('adv', adv)
   tf.summary.histogram('ret', ret)
   tf.summary.histogram('act', act)
+
   if cnn:
     tf.summary.image('obs', obs)
   else:
     tf.summary.histogram('obs', obs)
 
-  return adv, obs, is_training, act, ret
+  return adv, obs, is_training, act, ret, lrt, ent_coeff
+
+
+class Scheduler(object):
+  def __init__(self, init_val, final_val, n_steps):
+    self._init_val = init_val
+    self._final_val = final_val
+    self._n_steps = n_steps
+
+  def current_value(self, train_step):
+    return self._init_val - min(train_step, self._n_steps) \
+        * (self._init_val-self._final_val) / self._n_steps

@@ -18,8 +18,8 @@ class A2CRunner(object):
     self._act_dim = 1 if discrete else env.action_space.shape[0]
     self._batch_obs_shape = (n_steps*n_envs,) \
         + self._env.observation_space.shape
-    self._dones = [False for _ in range(n_envs)]
 
+    # We must store the observations between calls to generate_rollouts
     self._obs = self._env.reset()
 
   def generate_rollouts(self):
@@ -43,9 +43,9 @@ class A2CRunner(object):
       actions, values = self._policy.step(self._obs)
       rollout_values.append(np.squeeze(values))
       rollout_actions.append(actions)
-      self._obs, rewards, self._dones, _ = self._env.step(actions)
+      self._obs, rewards, dones, _ = self._env.step(actions)
       rollout_rewards.append(rewards)
-      rollout_dones.append(self._dones)
+      rollout_dones.append(dones)
 
     # Store last values, $v(x_{n_steps+1})$ for bootstrapping the returns
     last_values = self._policy.critic(self._obs)
