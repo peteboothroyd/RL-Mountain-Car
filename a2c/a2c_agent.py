@@ -9,16 +9,17 @@ from tensorflow.python import debug as tf_debug
 from baselines import logger
 from baselines.common import set_global_seeds
 
-from a2c_policy import A2CPolicy
+from a2c import ActorCritic
 from a2c_runner import A2CRunner
-from plots import value_rollout_plot
+
+INFO_ALE_LIVES_KEY = 'ale.lives'
 
 
 class A2CAgent(object):
-  def __init__(self, env, model_dir, n_steps, debug, gamma, cnn,
+  def __init__(self, train_envs, eval_env, model_dir, n_steps, debug, gamma, cnn,
                summary_every, num_learning_steps, seed, tensorboard_summaries,
                save_every, load_checkpoint, checkpoint_prefix):
-    discrete = isinstance(env.action_space, gym.spaces.Discrete)
+    discrete = isinstance(train_envs.action_space, gym.spaces.Discrete)
 
     num_cpu = multiprocessing.cpu_count()
     tf_config = tf.ConfigProto(
@@ -38,17 +39,19 @@ class A2CAgent(object):
 
     self._model_dir = model_dir+'/model'
     self._tensorboard_summaries = tensorboard_summaries
-    self._env = env
+    self._train_envs = train_envs
+    self._eval_env = eval_env
 
-    batch_size = n_steps*env.num_envs
+    batch_size = n_steps*train_envs.num_envs
     self._num_policy_updates = num_learning_steps//batch_size
 
-    self._policy = A2CPolicy(
-        sess=self._sess, obs_space=env.observation_space, cnn=cnn,
-        act_space=env.action_space, num_policy_updates=self._num_policy_updates)
+    self._actor_critic = ActorCritic(
+        sess=self._sess, obs_space=train_envs.observation_space, cnn=cnn,
+        act_space=train_envs.action_space,
+        num_policy_updates=self._num_policy_updates)
     self._runner = A2CRunner(
-        policy=self._policy, env=env, n_steps=n_steps, gamma=gamma,
-        discrete=discrete)
+        actor_critic=self._actor_critic, env=train_envs, n_steps=n_steps,
+        gamma=gamma, discrete=discrete)
 
     if self._tensorboard_summaries:
       self._summary_writer = tf.summary.FileWriter(model_dir)
@@ -76,18 +79,14 @@ class A2CAgent(object):
 
   def evaluate(self):
     ''' Evaluate a learned model by rolling out the policy. '''
-    obs = self._env.reset()
-    rollout_values = []
-    done_counter = 0
+    obs = self._eval_env.reset()
 
-    while done_counter < 10:
-      actions, values = self._policy.step(obs)
-      obs, _, dones, _ = self._env.step(actions)
-      if dones[0]:
-        done_counter += 1
-      rollout_values.append(np.squeeze(values))
+    while True:
+      actions, _ = self._actor_critic.step(obs)
+      obs, _, _, info = self._eval_env.step(actions)
 
-    value_rollout_plot(rollout_values)
+      if info[0][INFO_ALE_LIVES_KEY] < 1:
+        break
 
   def learn(self):
     ''' Learn an optimal policy parameterisation by
@@ -107,7 +106,7 @@ class A2CAgent(object):
         total_timesteps += returns.shape[0]
         n_seconds = time.time()-start_time
 
-        pg_loss, val_loss, expl_loss, reg_loss, entropy, summary = self._policy.train(
+        pg_loss, val_loss, expl_loss, ent, summary = self._actor_critic.train(
             observations, returns, actions, values)
 
         if summarise:
@@ -117,24 +116,25 @@ class A2CAgent(object):
           logger.record_tabular('pg_loss', pg_loss)
           logger.record_tabular('expl_loss', expl_loss)
           logger.record_tabular('val_loss', val_loss)
-          logger.record_tabular('reg_loss', reg_loss)
-          logger.record_tabular('entropy', entropy)
+          logger.record_tabular('entropy', ent)
           logger.dump_tabular()
 
           if self._tensorboard_summaries:
             self._summary_writer.add_summary(summary, self._step)
 
         if self._step % self._save_every == 0 and self._step > 0:
+          self.evaluate()
           self.save_model()
     finally:
       # Save out necessary checkpoints & diagnostics
       self._close()
 
-  def reset_policy(self):
-    self._policy.reset()
+  def reset_actor_critic(self):
+    self._actor_critic.reset()
 
   def _close(self):
-    self._env.close()
+    self._eval_env.close()
+    self._train_envs.close()
 
     if self._tensorboard_summaries:
       self._summary_writer.close()

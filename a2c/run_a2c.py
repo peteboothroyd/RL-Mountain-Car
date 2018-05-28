@@ -5,7 +5,9 @@ import gym
 
 import numpy as np
 import tensorflow as tf
-from gym.wrappers import Monitor
+
+from gym.wrappers import Monitor as GymMonitor
+from baselines.bench import Monitor as BenchMonitor
 
 from a2c_agent import A2CAgent
 from baselines import logger
@@ -14,37 +16,33 @@ from baselines.common.atari_wrappers import make_atari, wrap_deepmind
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
 from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 
-from gym_environment import Continuous_MountainCarEnv
-
-# Environment ids
-MOUNTAIN_CAR_ID = 'mountain_car'
-# Breakout actions = ['noop', 'fire', 'left', 'right']
+# Breakout actions = ['noop', 'fire', 'right', 'left']
 BREAKOUT_ID = 'BreakoutNoFrameskip-v4'
 
 
 def main():
   args = command_line_args()
+
+  set_global_seeds(args.seed)
   model_dir = '{}/{}_{:%Y-%m-%d_%H:%M:%S}'.format(
       args.model_dir, args.exp_name, datetime.datetime.now())
   logger.configure(model_dir)
 
-  cnn = False
   num_env = args.num_env if not args.evaluate else 1
 
-  if not args.no_atari_env:
-    env = VecFrameStack(
-        make_atari_env(env_id=args.env_id, num_env=num_env, seed=args.seed,
-                       save_every=args.save_every), 4)
-    # Use a CNN for the ATARI games
+  train_envs, eval_env = make_atari_env(
+      env_id=args.env_id, num_env=num_env, seed=args.seed) 
+  train_envs = VecFrameStack(train_envs, 4)
+  eval_env = VecFrameStack(eval_env, 4)
+
+  if not args.use_mlp:
     cnn = True
-  elif args.env_id == MOUNTAIN_CAR_ID:
-    def env_factory():
-      return Continuous_MountainCarEnv(terminating=True, t_step=0.3)
-    env = make_env(
-        env_factory, args.num_env, args.seed, args.save_every, deepmind=False)
+  else:
+    cnn = False
 
   agent = A2CAgent(
-      env,
+      train_envs,
+      eval_env,
       model_dir=model_dir,
       n_steps=args.n_steps,
       num_learning_steps=args.num_learning_steps,
@@ -94,19 +92,17 @@ def command_line_args():
   parser.add_argument(
       '--evaluate', action='store_true', help='evaluate a prelearned agent')
   parser.add_argument(
+      '--use_mlp', action='store_true',
+      help='use a multilayer perceptron architecture')
+  parser.add_argument(
       '--load_checkpoint', action='store_true',
       help='restore the model from a checkpoint')
   parser.add_argument(
       '--checkpoint_prefix', help='prefix of checkpoint files', default='')
   parser.add_argument(
-      '--env_id', choices=[MOUNTAIN_CAR_ID, BREAKOUT_ID], default=BREAKOUT_ID,
+      '--env_id', choices=[BREAKOUT_ID], default=BREAKOUT_ID,
       help='The environment to use for the A2C algorithm (default: {0})'
       .format(BREAKOUT_ID))
-  parser.add_argument(
-      '--no_atari_env', action='store_true',
-      help='Whether to make an ATARI environment from the ALE. This will \
-        cause a CNN rather than an MLP to be used on the observation for \
-        the policy.')
   parser.add_argument(
       '--num_env',
       help="The number of different environments", type=int, default=16)
@@ -114,56 +110,62 @@ def command_line_args():
       '--seed', help='The random number generator seed', default=1, type=int)
   return parser.parse_args()
 
+# def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
+#     """
+#     Create a wrapped, monitored SubprocVecEnv for Atari.
+#     """
+#     if wrapper_kwargs is None: wrapper_kwargs = {}
+#     # Make the training envs which use the BenchMonitor and periodically flush
+#     # progress.
+#     def make_env(rank): # pylint: disable=C0111
+#         def _thunk():
+#             env = make_atari(env_id)
+#             env.seed(seed + rank)
+#             env = BenchMonitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)))
+#             return wrap_deepmind(env, **wrapper_kwargs)
+#         return _thunk
+#     set_global_seeds(seed)
+#     return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)])
 
-def make_env(env_factory, num_env, seed, wrapper_kwargs=None, start_index=0,
-             deepmind=True, save_every=100):
+
+def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0):
   """
   Create a wrapped, monitored SubprocVecEnv for Atari. Note this is altered from
-  the OpenAI baselines repo:
-  https://github.com/openai/baselines/blob/master/baselines/common/cmd_util.py
-  This version changes the Monitor to the OpenAI gym monitor, for recording
-  video and statistics.
+  the OpenAI baselines.common.cmd_util
+  This version changes the Monitors to the OpenAI gym monitor, for recording
+  video and statistics, and provides an evaluation agent in addition to the
+  SubprocVecEnv wrapped training environments.
   """
-  if wrapper_kwargs is None: wrapper_kwargs = {}
-  
-  def make_envs(rank, monitor):
-    def render_video(episode_id):
-      print('Monitor: current episode id: {0}'.format(episode_id))
-      return episode_id % save_every == 0
+  if wrapper_kwargs is None:
+    wrapper_kwargs = {}
 
+  def make_bench_monitor_env(rank):
     def _thunk():
-      env = env_factory()
+      env = make_atari(env_id)
       env.seed(seed + rank)
-      if monitor:
-        env = Monitor(
-            env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
-            video_callable=render_video)
-      if deepmind:
-        return wrap_deepmind(env, **wrapper_kwargs)
-      else:
-        return env
+      env = BenchMonitor(env, logger.get_dir()
+                         and os.path.join(logger.get_dir(), str(rank)))
+      return wrap_deepmind(env, **wrapper_kwargs)
     return _thunk
-  set_global_seeds(seed)
+  
+  def make_gym_monitor_env(name):
+    def _thunk():
+      env = make_atari(env_id)
+      env.seed(seed+num_env)
+      env = GymMonitor(env, os.path.join(logger.get_dir(), name),
+                       video_callable=lambda ep_id: True)
+      return wrap_deepmind(env, **wrapper_kwargs)
+    return _thunk
 
-  # Only monitor one of the environments
-  env_list = []
-  for i in range(num_env):
-    if i == 0:
-      env_list.append(make_envs(i+start_index, True))
-    else:
-      env_list.append(make_envs(i+start_index, False))
+  # Make the training envs which use the BenchMonitor and periodically flush
+  # progress.
+  train_envs = SubprocVecEnv(
+      [make_bench_monitor_env(i+start_index) for i in range(num_env)])
 
-  return SubprocVecEnv(env_list)
+  # Create one evaluation environment with a GymMonitor which can record video
+  eval_env = SubprocVecEnv([make_gym_monitor_env('eval')])
 
-
-def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0,
-                   deepmind=True, save_every=100):
-  def env_factory():
-    return make_atari(env_id)
-  return make_env(
-      env_factory=env_factory, num_env=num_env, seed=seed,
-      wrapper_kwargs=wrapper_kwargs, start_index=start_index,
-      save_every=save_every)
+  return train_envs, eval_env
 
 
 if __name__ == '__main__':

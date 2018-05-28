@@ -9,3 +9,5 @@ tmp/**/*
 model_out/**/*
 archived_model_out/**/*
 support_values
+*.mov
+*.csv
