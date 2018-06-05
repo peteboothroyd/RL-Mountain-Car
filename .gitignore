@@ -11,3 +11,4 @@ archived_model_out/**/*
 support_values
 *.mov
 *.csv
+*.mat
